@@ -13,6 +13,7 @@ setwd("~/Documents/hypoxiaMapping")
 
 #Water data
 wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% 
+  relocate(YEID:Date,Depth,DO,Temp:lon) %>% 
   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326)
 
 #Get locations from wDat to join onto spatial data
@@ -38,11 +39,35 @@ spDomain <- wDat %>% st_union() %>% st_convex_hull() %>% st_buffer(dist=1) %>% s
 names(spDomain) <- c('left','bottom','right','top')
 basemap <- get_map(location=spDomain) #Get from Google Earth
 
-# Take a look at data -----------------------------------------------------
+# Helper functions -----------
 
-#Water data
+midcut <- function(dat,b,...){ #Function to cut data and assign label as midpoint (not boundaries)
+  x <- cut(dat,breaks=b,...) # cut the data into bins...
+  if(length(b)==1){ #If single break value
+    s <- seq(min(dat,na.rm=TRUE),max(dat,na.rm=TRUE),length.out=b+1) #Sequence of boundary points
+  } else { #If multiple break values
+    s <- b; b <- length(s)
+  }
+  levels(x) <- round(rowMeans(cbind(s,lag(s)))[2:c(b+1)],1) #Average with lag, then assign as new levels
+  return(x)
+}
 
-#only surface water
+dateCut <- function(d,b,include.lowest=TRUE){ #Cut date object d into b discrete chunks, and return as date object
+  #include.lowest = should date on left boundary be included in category 1 (otherwise returns NA)
+  if(class(b)=='character' & length(b)>1){ 
+    b <- as.numeric(as.Date(b)) 
+  } else if(!(length(b)==1 & class(b)=='numeric')) {
+    stop('b must be single number, or character vector of date breaks in YYYY-MM-DD format')
+  }
+  cdates <- midcut(as.numeric(d),b,include.lowest=include.lowest) #Convert date to numeric, and chop into pieces
+  cdates <- round(as.numeric(as.character(cdates))) #Turn into integers (using midpoint between breaks)
+  cdates <- as.Date(cdates,origin="1970-01-01") #Turn into dates
+  return(cdates)
+}
+
+# Take a look at water data ---------------------
+
+#choose only surface water, using order of depth measurements
 surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>% 
   filter(depthOrd==1) %>% select(-depthOrd)
 
@@ -64,7 +89,7 @@ p <- ggplot()+
 ggsave('./figures/prelimFigs/wDat_DO_date.png',p,width=8,height=6)
 
 #Time series plots - may have to restrict analysis to specific time "chunks"
-p <- surfWDat %>% st_drop_geometry() %>% pivot_longer(c(DO,Temp,Salin)) %>% 
+p <- surfWDat %>% st_drop_geometry() %>% pivot_longer(c(DO:Salin)) %>% 
   ggplot(aes(x=Date,y=value))+geom_point()+
   facet_wrap(~name,ncol=1)
 ggsave('./figures/prelimFigs/wDat_overall_ts.png',p,width=8,height=8)
@@ -89,10 +114,20 @@ panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...){
 }
 
 png(file = './figures/prelimFigs/wDat_overall_cor.png',width=6,height=6,units='in',res=150)
-surfWDat %>% st_drop_geometry() %>% select(DO,Temp,Salin) %>% pairs(upper.panel=panel.cor,diag.panel=panel.hist)
+surfWDat %>% st_drop_geometry() %>% select(DO:Salin) %>% pairs(upper.panel=panel.cor,diag.panel=panel.hist)
 dev.off()
 
-# Spectral data
+#How do water values change with depth?
+# Salin increases with depth (mixing at surface near rivers), temp decreases (vertical mixing)
+# DO decreases with depth, but highly variable in general
+p <- wDat %>% st_drop_geometry() %>% 
+  pivot_longer(c(DO:Salin)) %>% mutate(fDate=dateCut(Date,6)) %>% 
+  ggplot()+  geom_point(aes(x=value,y=Depth),alpha=0.3)+
+  facet_grid(fDate~name,scales='free_x')+
+  scale_y_reverse()+labs(y='Depth',x='Measurement')
+ggsave('./figures/prelimFigs/wDat_depth_overall.png',p,width=8,height=10)
+
+# Take a look at spectral data ----------------------------
 sDat
 head(sDat)
 
@@ -102,26 +137,28 @@ p <- sDat %>% select(YEID:poc) %>% pivot_longer(c(chlor_a:poc)) %>% filter(!is.n
 ggsave('./figures/prelimFigs/sDat_overall_ts.png',p,width=8,height=8)
 
 
-
-#Make animation of spectral data across time range 
-gen_anim <- function() {
+#Make animation of spectral data across time range
+gen_anim <- function() { #Generate set of frames
+  sDat3 <- sDat2 %>% mutate(across(chlor_a:poc,~as.vector(scale(.x)))) #%>% pivot_longer(chlor_a:poc)
   mapFun <- function(tau) { #Function to make single frame
-    s <- sDat2 %>%  filter(date_img == tau)   # subset data to time step tau
+    s <- sDat3 %>%  filter(date_img == tau) #subset data to time step tau
+      # %>% filter(!is.na(value))
     f <- function(dat,channel,lims){ #Function to make standard figure
-      ggmap(basemap) + geom_sf(data=s,aes(geometry=geometry,colour = {{channel}},size={{channel}}),inherit.aes = FALSE) + 
+      ggmap(basemap) + geom_sf(data=s,aes(geometry=geometry,colour = {{channel}},size={{channel}}),inherit.aes = FALSE) +
         guides(size=FALSE)+
         scale_size(limits=lims)+
-        scale_colour_gradient(limits=lims)
+        # scale_colour_gradient(limits=lims)
+        scale_colour_distiller(limits=lims,type='div',palette = "YlOrBr",na.value=NA)
     }
-    p1 <- f(s,chlor_a,range(sDat2$chlor_a,na.rm=TRUE))
-    p2 <- f(s,nflh,range(sDat2$nflh,na.rm=TRUE))
-    p3 <- f(s,poc,range(sDat2$poc,na.rm=TRUE))
+    p1 <- f(s,chlor_a,range(sDat3$chlor_a,na.rm=TRUE))
+    p2 <- f(s,nflh,range(sDat3$nflh,na.rm=TRUE))
+    p3 <- f(s,poc,range(sDat3$poc,na.rm=TRUE))
     p <- ggarrange(p1,p2,p3,ncol=1)
     p <- annotate_figure(p,top = text_grob(as.character(tau),size=10))
     return(p)
   }
-  # test <- mapFun(tau)
-  
+  mapFun(tau=sDat2$date_img[1])
+
   for(t in 1:length(unique(sDat2$date_img))){  # for each time point
     print(mapFun(tau=unique(sDat2$date_img)[t]))   # plot data at this time point
   }
@@ -135,30 +172,38 @@ setwd("~/Documents/hypoxiaMapping")
 
 #Hovmoller plots for each channel
 
-midcut<-function(dat,b){ #Function to cut data and assign label as midpoint (not boundaries)
-  x <- cut(dat,breaks=b) # cut the data into bins...
-  s <- seq(min(dat,na.rm=TRUE),max(dat,na.rm=TRUE),length.out=b+1) #Sequence of boundary points
-  levels(x) <- round(rowMeans(cbind(s,lag(s)))[2:c(b+1)],1) #Average with lag, then assign as new levels
-  return(x)
-}
 
-sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% mutate(lon=midcut(lon,20)) %>% st_drop_geometry() %>% 
+p1 <- sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% 
+  mutate(lon=midcut(lon,20)) %>% st_drop_geometry() %>% 
+  mutate(across(chlor_a:poc,~scale(.x))) %>% 
   group_by(date_img,lon) %>% summarize(across(c(chlor_a:poc),mean,na.rm=TRUE)) %>% ungroup() %>% 
   mutate(lon=as.numeric(as.character(lon))) %>% 
   pivot_longer(chlor_a:poc) %>% 
-  ggplot(aes(x=lon,y=date_img))+geom_tile(aes(fill=value))+facet_wrap(~name)
+  ggplot(aes(x=lon,y=date_img))+geom_tile(aes(fill=value))+facet_wrap(~name)+
+  scale_fill_distiller(type='div',palette = "YlOrBr",na.value=NA)+
+  theme(panel.background = element_rect(fill = 'grey'))+
+  labs(x='Longitude',y='Date')+theme(legend.position = 'bottom')
 
-sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% mutate(lon=cut(lon,breaks=20)) %>% st_drop_geometry() %>% 
-  group_by(date_img,lon) %>% summarize(across(c(chlor_a:poc),mean,na.rm=TRUE)) %>% ungroup() %>% pull(lon) %>% 
-  levels(.) %>% str()
+p2 <- sDat2 %>% mutate(lat=st_coordinates(.)[,2]) %>% 
+  mutate(lat=midcut(lat,20)) %>% st_drop_geometry() %>% 
+  mutate(across(chlor_a:poc,~scale(.x))) %>% 
+  group_by(date_img,lat) %>% summarize(across(c(chlor_a:poc),mean,na.rm=TRUE)) %>% ungroup() %>% 
+  mutate(lat=as.numeric(as.character(lat))) %>% 
+  pivot_longer(chlor_a:poc) %>% 
+  ggplot(aes(x=lat,y=date_img))+geom_tile(aes(fill=value))+facet_wrap(~name)+
+  scale_fill_distiller(type='div',palette = "YlOrBr",na.value=NA)+
+  theme(panel.background = element_rect(fill = 'grey'))+
+  labs(x='Latitude',y='Date')+theme(legend.position = 'bottom')
+p <- ggarrange(p1,p2,ncol=2,common.legend=TRUE,legend='right')
+ggsave('./figures/prelimFigs/sDat_hovmoller.png',p,width=12,height=8)
 
-sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% pull(lon) %>% min()
-
-
+# sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% mutate(lon=cut(lon,breaks=20)) %>% st_drop_geometry() %>% 
+#   group_by(date_img,lon) %>% summarize(across(c(chlor_a:poc),mean,na.rm=TRUE)) %>% ungroup() %>% pull(lon) %>% 
+#   levels(.) %>% str()
 
 #Pretty low correlation between classes. Do these actually mean the same thing? Ask YL or LN how these are typically used.
 png(file = './figures/prelimFigs/sDat_overall_cor.png',width=6,height=6,units='in',res=150)
-sDat2 %>% select(chlor_a:poc) %>% na.omit() %>% pairs(upper.panel=panel.cor,diag.panel=panel.hist)
+sDat2 %>% select(chlor_a:poc) %>% na.omit() %>% st_drop_geometry() %>% pairs(upper.panel=panel.cor,diag.panel=panel.hist)
 dev.off()
 
 
