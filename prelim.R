@@ -13,8 +13,14 @@ setwd("~/Documents/hypoxiaMapping")
 
 #Water data
 wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% 
-  relocate(YEID:Date,Depth,DO,Temp:lon) %>% 
+  # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
+  group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
+  select(-Depth_dem) %>% relocate(YEID:Date,Depth,maxDepth,propDepth,DO,Temp:lon) %>% 
   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326)
+
+# # 2014_003, 2014_149 are different times at the same location
+# wDat %>% mutate(x=st_coordinates(.)[,1],y=st_coordinates(.)[,2]) %>% unite(loc,x,y) %>% st_drop_geometry() %>% select(YEID,loc) %>%
+#   distinct() %>% group_by(loc) %>% mutate(n=n()) %>% filter(n>1)
 
 #Get locations from wDat to join onto spatial data
 locIndex <- wDat %>% select(YEID,geometry) %>% distinct()
@@ -38,6 +44,14 @@ sDat2 <- sDat %>% select(YEID:poc,geometry) %>%
 spDomain <- wDat %>% st_union() %>% st_convex_hull() %>% st_buffer(dist=1) %>% st_bbox() #Spatial domain
 names(spDomain) <- c('left','bottom','right','top')
 basemap <- get_map(location=spDomain) #Get from Google Earth
+
+#choose only surface water, using order of depth measurements
+surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>% 
+  filter(depthOrd==1) %>% select(-depthOrd)
+
+#choose only bottom water
+bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>% 
+  filter(depthOrd==1) %>% select(-depthOrd)
 
 # Helper functions -----------
 
@@ -65,11 +79,17 @@ dateCut <- function(d,b,include.lowest=TRUE){ #Cut date object d into b discrete
   return(cdates)
 }
 
-# Take a look at water data ---------------------
+#Turn sf geometry (x/y coordinates) into columns
+#   removeGeom: should geometry be dropped?
+#   epsgCode: should CRS be transformed (useful for lat/lon -> UTM)
+geom2cols <- function(d,x=lon,y=lat,removeGeom=TRUE,epsg=NA){
+  if(!is.na(epsg)) d <- st_transform(d,epsg) #Transform to new CRS
+  d <- d %>% mutate({{x}}:=st_coordinates(.)[,1],{{y}}:=st_coordinates(.)[,2]) #Make new columns from coordinates
+  if(removeGeom) d <- st_drop_geometry(d) #Drop geometry
+  return(d)
+}
 
-#choose only surface water, using order of depth measurements
-surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>% 
-  filter(depthOrd==1) %>% select(-depthOrd)
+# Take a look at water data ---------------------
 
 #Overall
 p1 <- ggmap(basemap)+geom_sf(data=surfWDat,aes(col=DO),inherit.aes = FALSE)+
@@ -79,7 +99,16 @@ p2 <- ggmap(basemap)+geom_sf(data=surfWDat,aes(col=Salin),inherit.aes = FALSE)+ 
 p3 <- ggmap(basemap)+geom_sf(data=surfWDat,aes(col=Temp),inherit.aes = FALSE)+ #Temp
   scale_colour_distiller(type='div',palette = "YlOrBr")
 p <- ggarrange(p1,p2,p3,ncol=1)
-ggsave('./figures/prelimFigs/wDat_overall.png',p,width=8,height=8)
+ggsave('./figures/prelimFigs/wDat_overall_surf.png',p,width=8,height=8)
+
+p1 <- ggmap(basemap)+geom_sf(data=bottomWDat,aes(col=DO),inherit.aes = FALSE)+
+  scale_colour_distiller(type='div',palette = "YlOrBr")
+p2 <- ggmap(basemap)+geom_sf(data=bottomWDat,aes(col=Salin),inherit.aes = FALSE)+ #Salin
+  scale_colour_distiller(type='div',palette = "YlOrBr")
+p3 <- ggmap(basemap)+geom_sf(data=bottomWDat,aes(col=Temp),inherit.aes = FALSE)+ #Temp
+  scale_colour_distiller(type='div',palette = "YlOrBr")
+p <- ggarrange(p1,p2,p3,ncol=1)
+ggsave('./figures/prelimFigs/wDat_overall_bottom.png',p,width=8,height=8)
 
 #Split up maps by date
 p <- ggplot()+
@@ -122,10 +151,21 @@ dev.off()
 # DO decreases with depth, but highly variable in general
 p <- wDat %>% st_drop_geometry() %>% 
   pivot_longer(c(DO:Salin)) %>% mutate(fDate=dateCut(Date,6)) %>% 
-  ggplot()+  geom_point(aes(x=value,y=Depth),alpha=0.3)+
+  ggplot()+  geom_point(aes(x=value,y=Depth),alpha=0.3)+ #Uses absolute depth
   facet_grid(fDate~name,scales='free_x')+
   scale_y_reverse()+labs(y='Depth',x='Measurement')
 ggsave('./figures/prelimFigs/wDat_depth_overall.png',p,width=8,height=10)
+
+wDat %>% st_drop_geometry() %>% 
+  pivot_longer(c(DO:Salin)) %>% mutate(fDate=dateCut(Date,6)) %>% 
+  ggplot()+  geom_point(aes(x=value,y=Depth/Depth_dem),alpha=0.3)+ #Uses proportional depth
+  facet_grid(fDate~name,scales='free_x')+
+  scale_y_reverse()+labs(y='Proportion Depth',x='Measurement')
+
+wDat %>% group_by(YEID) %>% mutate(mDepth=max(Depth,Depth_dem)) %>% data.frame()
+
+wDat %>% group_by(YEID) %>% slice(1)
+
 
 # Take a look at spectral data ----------------------------
 sDat
@@ -171,8 +211,6 @@ setwd("~/Documents/hypoxiaMapping")
 #Hard to see distinct patterns using animations, but it looks like there are "pulses" here and there
 
 #Hovmoller plots for each channel
-
-
 p1 <- sDat2 %>% mutate(lon=st_coordinates(.)[,1]) %>% 
   mutate(lon=midcut(lon,20)) %>% st_drop_geometry() %>% 
   mutate(across(chlor_a:poc,~scale(.x))) %>% 
@@ -206,6 +244,29 @@ png(file = './figures/prelimFigs/sDat_overall_cor.png',width=6,height=6,units='i
 sDat2 %>% select(chlor_a:poc) %>% na.omit() %>% st_drop_geometry() %>% pairs(upper.panel=panel.cor,diag.panel=panel.hist)
 dev.off()
 
+# Fit model of chlor_a ----------------------------------------------------
+library(mgcv)
 
+chlorDat <- sDat2 %>% geom2cols(E,N,epsg=3401) %>% 
+  mutate(sE=as.vector(scale(E)),sN=as.vector(scale(N))) %>% 
+  mutate(doy=format(date_img,format='%j'),doy=as.vector(scale(as.numeric(doy)))) %>% 
+  mutate(logChlor=log(chlor_a)) %>% 
+  filter(!is.na(chlor_a))
+
+# library(parallel) #No significant difference in fitting times using bam
+# detectCores()
+# cl <- makeCluster(12)
+# stopCluster(cl) 
+
+chlorMod <- gam(logChlor~te(sN,sE,doy,k=9),data=chlorDat)  
+
+summary(chlorMod)
+par(mfrow=c(2,2)); gam.check(chlorMod); par(mfrow=c(1,1))
+plot(chlorMod,scheme=3,too.far=0.1)
+
+chlorDat$resid <- resid(chlorMod)
+
+ggplot(chlorDat)+geom_point(aes(x=E,y=N,col=resid,size=abs(resid)))+
+  scale_colour_distiller(type='div',palette = "YlOrBr")
 
 
