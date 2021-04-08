@@ -11,34 +11,41 @@ library(animation)
 
 setwd("~/Documents/hypoxiaMapping")
 
+source('helperFunctions.R')
+
 #Water data
-wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% 
+wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% mutate(doy=as.numeric(format(Date,format='%j'))) %>% 
   # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
   group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
-  select(-Depth_dem) %>% relocate(YEID:Date,Depth,maxDepth,propDepth,DO,Temp:lon) %>% 
+  select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>% 
   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326)
+
+# #All YEIDs are from a single day
+# wDat %>% st_drop_geometry() %>% group_by(YEID) %>% summarize(nDays=length(unique(Date))) %>% filter(nDays!=1)
 
 # # 2014_003, 2014_149 are different times at the same location
 # wDat %>% mutate(x=st_coordinates(.)[,1],y=st_coordinates(.)[,2]) %>% unite(loc,x,y) %>% st_drop_geometry() %>% select(YEID,loc) %>%
 #   distinct() %>% group_by(loc) %>% mutate(n=n()) %>% filter(n>1)
 
 #Get locations from wDat to join onto spatial data
-locIndex <- wDat %>% select(YEID,geometry) %>% distinct()
-
+locIndex <- wDat %>% select(YEID,Date,doy,geometry) %>% distinct() %>%
+  geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% 
+  mutate(sE=(E-mean(E))/1000,sN=(N-mean(N))/1000) #Center E/N and convert to km
+  
 #Spectral data
 sDat <- read.csv('./data/sample_spectralData.csv') %>% 
   left_join(locIndex,by='YEID') %>% #Join in spatial info
   st_as_sf() %>% 
-  mutate(date_img=as.Date(date_img,'%Y-%m-%d'))
+  mutate(date_img=as.Date(date_img,'%Y-%m-%d')) %>% 
+  mutate(nflh=ifelse(nflh<0,0,ifelse(nflh>1,1,nflh))) %>% #Limits nflh to between 0 and 1
+  mutate(poc=ifelse(nflh<0,1,poc)) #Changes negative poc to 1 (really low)
 
 #Not sure what the other channels are, so removing them for now, and stripping out data-less days
-sDat2 <- sDat %>% select(YEID:poc,geometry) %>% 
-  mutate(noData=is.na(chlor_a)&is.na(nflh)&is.na(poc)) %>% 
+sDat2 <- sDat %>% select(YEID:poc,E:geometry) %>% 
+  mutate(noData=is.na(chlor_a)&is.na(nflh)&is.na(poc)) %>% #Strip missing data
   group_by(date_img) %>% mutate(n=n(),nNoDat=sum(noData)) %>% #All have 205 locations
   filter(nNoDat<(n*0.5)) %>% #Remove days where >50% of data are missing
-  select(-noData:-nNoDat) %>% ungroup() %>% 
-  mutate(nflh=ifelse(nflh<0,0,ifelse(nflh>1,1,nflh))) %>% #Limits between 0 and 1
-  mutate(poc=ifelse(nflh<0,1,poc)) #Changes negative poc to 1 (really low)
+  select(-noData:-nNoDat) %>% ungroup() 
 
 #Base map
 spDomain <- wDat %>% st_union() %>% st_convex_hull() %>% st_buffer(dist=1) %>% st_bbox() #Spatial domain
@@ -53,41 +60,6 @@ surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungrou
 bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>% 
   filter(depthOrd==1) %>% select(-depthOrd)
 
-# Helper functions -----------
-
-midcut <- function(dat,b,...){ #Function to cut data and assign label as midpoint (not boundaries)
-  x <- cut(dat,breaks=b,...) # cut the data into bins...
-  if(length(b)==1){ #If single break value
-    s <- seq(min(dat,na.rm=TRUE),max(dat,na.rm=TRUE),length.out=b+1) #Sequence of boundary points
-  } else { #If multiple break values
-    s <- b; b <- length(s)
-  }
-  levels(x) <- round(rowMeans(cbind(s,lag(s)))[2:c(b+1)],1) #Average with lag, then assign as new levels
-  return(x)
-}
-
-dateCut <- function(d,b,include.lowest=TRUE){ #Cut date object d into b discrete chunks, and return as date object
-  #include.lowest = should date on left boundary be included in category 1 (otherwise returns NA)
-  if(class(b)=='character' & length(b)>1){ 
-    b <- as.numeric(as.Date(b)) 
-  } else if(!(length(b)==1 & class(b)=='numeric')) {
-    stop('b must be single number, or character vector of date breaks in YYYY-MM-DD format')
-  }
-  cdates <- midcut(as.numeric(d),b,include.lowest=include.lowest) #Convert date to numeric, and chop into pieces
-  cdates <- round(as.numeric(as.character(cdates))) #Turn into integers (using midpoint between breaks)
-  cdates <- as.Date(cdates,origin="1970-01-01") #Turn into dates
-  return(cdates)
-}
-
-#Turn sf geometry (x/y coordinates) into columns
-#   removeGeom: should geometry be dropped?
-#   epsgCode: should CRS be transformed (useful for lat/lon -> UTM)
-geom2cols <- function(d,x=lon,y=lat,removeGeom=TRUE,epsg=NA){
-  if(!is.na(epsg)) d <- st_transform(d,epsg) #Transform to new CRS
-  d <- d %>% mutate({{x}}:=st_coordinates(.)[,1],{{y}}:=st_coordinates(.)[,2]) #Make new columns from coordinates
-  if(removeGeom) d <- st_drop_geometry(d) #Drop geometry
-  return(d)
-}
 
 # Take a look at water data ---------------------
 
@@ -247,26 +219,107 @@ dev.off()
 # Fit model of chlor_a ----------------------------------------------------
 library(mgcv)
 
-chlorDat <- sDat2 %>% geom2cols(E,N,epsg=3401) %>% 
-  mutate(sE=as.vector(scale(E)),sN=as.vector(scale(N))) %>% 
-  mutate(doy=format(date_img,format='%j'),doy=as.vector(scale(as.numeric(doy)))) %>% 
+#Using entire dataset. Fit is somewhat better if using reduced dataset (sDat2), but going with this for now.
+chlorDat <- sDat %>% select(YEID:chlor_a,E:geometry) %>% 
+  mutate(doy=format(date_img,format='%j'),doy=as.numeric(doy)) %>% 
   mutate(logChlor=log(chlor_a)) %>% 
-  filter(!is.na(chlor_a))
+  filter(!is.na(chlor_a)) #Strips out missing data
 
 # library(parallel) #No significant difference in fitting times using bam
 # detectCores()
 # cl <- makeCluster(12)
 # stopCluster(cl) 
 
-chlorMod <- gam(logChlor~te(sN,sE,doy,k=9),data=chlorDat)  
-
+#Uses 50 bases for N,E and 10 for time. Tensor product = 500 terms
+chlorMod <- gam(logChlor~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=chlorDat)
+# chlorMod <- gam(chlor_a~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=chlorDat,family=Gamma) #Takes a ton of time
 summary(chlorMod)
-par(mfrow=c(2,2)); gam.check(chlorMod); par(mfrow=c(1,1))
+par(mfrow=c(2,2)); gam.check(chlorMod); abline(0,1,col='red'); par(mfrow=c(1,1))
 plot(chlorMod,scheme=3,too.far=0.1)
+chlorDat$resid <- resid(chlorMod) #Residuals
 
-chlorDat$resid <- resid(chlorMod)
+#Get predictions
+predChlor <- with(chlorDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
+  separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>% 
+  mutate(pred=predict(chlorMod,newdata=.),se=predict(chlorMod,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
 
-ggplot(chlorDat)+geom_point(aes(x=E,y=N,col=resid,size=abs(resid)))+
-  scale_colour_distiller(type='div',palette = "YlOrBr")
+p1 <- predChlor %>% ggplot()+geom_point(aes(x=sE,y=sN,col=pred))+
+  facet_wrap(~date,nrow=1)+
+  scale_colour_distiller(type='div',palette = "Greens",direction=1)+
+  labs(x='E',y='N',col='Predicted\nlog(Chlor)')+
+  theme(legend.position='bottom')
 
+p2 <- predChlor %>% ggplot()+geom_point(aes(x=sE,y=sN,col=se))+
+  facet_wrap(~date,nrow=1)+
+  scale_colour_distiller(type='div',palette = "YlOrRd",direction=1) +
+  labs(x='E',y='N',col='SE')+
+  theme(legend.position='bottom')
+
+p <- ggarrange(p1,p2,nrow=2)
+ggsave('./figures/prelimFigs/chlorMod.png',p,width=11,height=6)
+
+# #Try larger tensor product (10x10x10).  What has 500 more coefficients gotten us?
+# chlorMod2 <- gam(logChlor~te(sN,sE,doy,k=10),data=chlorDat)  #Better AIC, but residual checks are about the same.
+# summary(chlorMod)
+# summary(chlorMod2)
+# anova(chlorMod,chlorMod2,test='Chisq') #Slightly worse CV (0.347 vs 0.350)
+# AIC(chlorMod,chlorMod2) #AIC is worse
+# chlorDat$resid2 <- resid(chlorMod2)
+# 
+# #Plot of residuals over space for 5 time slices. Looks like both models are doing poorly at the same places
+# pivot_longer(chlorDat,resid:resid2) %>%
+#   mutate(cDate=dateCut(date_img,6)) %>%
+#   ggplot()+geom_point(aes(x=E,y=N,col=value,size=abs(value)),alpha=0.5)+
+#   facet_grid(cDate~name)+
+#   scale_colour_distiller(type='div',palette = "RdBu")
+# 
+# #Mod1 is worse around the edges of the distribution, while mod2 is worse at the centre
+# chlorDat %>% mutate(resDiff=abs(resid)-abs(resid2)) %>%  #Difference of absolute residuals
+#   mutate(cDate=dateCut(date_img,12)) %>%
+#   ggplot()+geom_point(aes(x=E,y=N,col=resDiff,size=abs(resDiff)),alpha=0.5)+
+#   facet_wrap(~cDate)+
+#   scale_colour_distiller(type='div',palette = "RdBu") #Red = model1 worse, Blue = model2 worse
+# 
+# #Looks about the same in time
+# pivot_longer(chlorDat,resid:resid2) %>%
+#   ggplot(aes(x=date_img,y=value))+geom_point()+
+#   facet_wrap(~name,ncol=1)
+
+# Predict DO using chlor_a ------------------------------------------------
+
+#Simple model using lagged chlor_a to predict DO for both 
+
+#Get predictions at all locations through the entire season
+predChlor <- with(chlorDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>% 
+  left_join(select(locIndex,-doy,-Date),by='YEID') %>% #Join in spatial info
+  mutate(pred=predict(chlorMod,newdata=.),se=predict(chlorMod,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
+
+lags <- 0:60 #Try 0 to 60 day lags
+modList <- lapply(lags,function(i){
+  sWatTemp <- surfWDat
+  bWatTemp <- bottomWDat 
+  chooseThis <- predChlor$YEID==sWatTemp$YEID & predChlor$doy==(sWatTemp$doy-i) #Location of lagged chlor predictions
+  sWatTemp$lagChlor <- predChlor$pred[chooseThis]
+  bWatTemp$lagChlor <- predChlor$pred[chooseThis]
+  sMod <- lm(DO~lagChlor,data=sWatTemp)
+  bMod <- lm(DO~lagChlor,data=bWatTemp)
+  return(list(surface=sMod,bottom=bMod))
+})
+
+data.frame(lag=lags,surface=sapply(modList,function(i) sum(resid(i$surface)^2)),
+           bottom=sapply(modList,function(i) sum(resid(i$bottom)^2))) %>% 
+  pivot_longer(surface:bottom) %>% 
+  ggplot()+geom_point(aes(x=lag,y=value))+
+  facet_wrap(~name)+
+  labs(x='Time lag',y='Mean Squared Error')
+
+#Looks like surface water DO is more poorly predicted by chlor_a
+data.frame(lag=lags,surface=sapply(modList,function(i) summary(i$surface)$r.squared),
+           bottom=sapply(modList,function(i) summary(i$bottom)$r.squared)) %>% 
+  pivot_longer(surface:bottom) %>% 
+  ggplot()+geom_point(aes(x=lag,y=value))+
+  facet_wrap(~name)+
+  labs(x='Time lag',y='R-squared')
 
