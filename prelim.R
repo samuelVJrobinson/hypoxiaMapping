@@ -8,6 +8,7 @@ library(sf)
 library(ggmap)
 library(ggpubr)
 library(animation)
+library(mgcv)
 
 setwd("~/Documents/hypoxiaMapping")
 
@@ -18,7 +19,10 @@ wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y
   # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
   group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
   select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>% 
-  st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326)
+  st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326) %>% 
+  geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% #Louisiana offshore 
+  mutate(sE=(E-mean(E))/1000,sN=(N-mean(N))/1000) %>% #Center E/N and convert to km
+  st_transform(4326)
 
 # #All YEIDs are from a single day
 # wDat %>% st_drop_geometry() %>% group_by(YEID) %>% summarize(nDays=length(unique(Date))) %>% filter(nDays!=1)
@@ -28,10 +32,7 @@ wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y
 #   distinct() %>% group_by(loc) %>% mutate(n=n()) %>% filter(n>1)
 
 #Get locations from wDat to join onto spatial data
-locIndex <- wDat %>% select(YEID,Date,doy,geometry) %>% distinct() %>%
-  geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% #Louisiana offshore 
-  mutate(sE=(E-mean(E))/1000,sN=(N-mean(N))/1000) %>% #Center E/N and convert to km
-  st_transform(4326)
+locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct() 
   
 #Spectral data
 sDat <- read.csv('./data/sample_spectralData.csv') %>% 
@@ -44,7 +45,7 @@ sDat <- read.csv('./data/sample_spectralData.csv') %>%
 
 #Not sure what the other channels are, so removing them for now, and stripping out data-less days
 sDat2 <- sDat %>% select(YEID,date_img,doy,chlor_a:poc,E:geometry) %>% 
-  mutate(noData=is.na(chlor_a)&is.na(nflh)&is.na(poc)) %>% #Strip missing data
+  mutate(noData=is.na(chlor_a)&is.na(nflh)&is.na(poc)) %>% #Strip days where all data are missing
   group_by(date_img) %>% mutate(n=n(),nNoDat=sum(noData)) %>% #All have 205 locations
   filter(nNoDat<(n*0.5)) %>% #Remove days where >50% of data are missing
   select(-noData:-nNoDat) %>% ungroup() 
@@ -199,9 +200,9 @@ bottomWDat %>% left_join(mutate(st_drop_geometry(sDat),doy=doy),by=c('YEID','doy
   ggplot(aes(chlor_a,DO))+geom_point()
 
 # Fit GAM of chlor_a ----------------------------------------------------
-library(mgcv)
 
 #Using entire dataset. Fit is somewhat better if using reduced dataset (sDat2), but going with this for now.
+#Would fit be better using reduced dataset because of 
 chlorDat <- sDat %>% select(YEID:chlor_a,E:geometry) %>% 
   mutate(doy=format(date_img,format='%j'),doy=as.numeric(doy)) %>% 
   mutate(logChlor=log(chlor_a)) %>% 
@@ -215,6 +216,11 @@ chlorDat <- sDat %>% select(YEID:chlor_a,E:geometry) %>%
 #Uses 50 bases for N,E and 10 for time. Tensor product = 500 terms
 chlorMod <- gam(logChlor~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=chlorDat)
 # chlorMod <- gam(chlor_a~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=chlorDat,family=Gamma) #Takes a ton of time
+# chlorMod2 <- gam(chlor_a~te(sN,sE,doy,bs=c('tp','tp'),k=c(30,5),d=c(2,1)),data=chlorDat,family=Gamma())
+# chlorMod3 <- gam(chlor_a~te(sN,sE,doy,bs=c('tp','tp'),k=c(30,5),d=c(2,1)),data=chlorDat,family=inverse.gaussian()) 
+# par(mfrow=c(2,2)); gam.check(chlorMod2); abline(0,1,col='red'); par(mfrow=c(1,1))
+# par(mfrow=c(2,2)); gam.check(chlorMod3); abline(0,1,col='red'); par(mfrow=c(1,1))
+
 summary(chlorMod)
 par(mfrow=c(2,2)); gam.check(chlorMod); abline(0,1,col='red'); par(mfrow=c(1,1))
 plot(chlorMod,scheme=3,too.far=0.1)
@@ -241,10 +247,93 @@ p2 <- predChlor %>% ggplot()+geom_point(aes(x=sE,y=sN,col=se))+
 (p <- ggarrange(p1,p2,nrow=2))
 ggsave('./figures/prelimFigs/chlorMod.png',p,width=11,height=6)
 
-#Plot of residuals over space for 5 time slices. Looks like both models are doing poorly at the same places
+#Plot of residuals over space for 12 time slices
 chlorDat %>% mutate(cDate=dateCut(date_img,12)) %>%
   ggplot()+geom_sf(aes(geometry=geometry,col=resid,size=abs(resid)),alpha=0.5)+
   facet_wrap(~cDate)+ scale_colour_distiller(type='div',palette = "RdBu")
+
+#Variogram of residuals
+
+library(gstat) #Spatial-only variogram
+
+#Overall spatial autocorrelation
+select(chlorDat,YEID,date_img,resid) %>% 
+  st_transform(3401) %>% as('Spatial') %>% 
+  variogram(resid~1, data=.,width=2000) %>% 
+  ggplot()+geom_line(aes(x=dist,y=gamma))+
+  labs(x='Distance',y='Semivariance')
+
+chlorDat %>% filter(date_img==first(date_img)) %>% 
+  select(YEID,date_img,resid) %>% 
+  st_transform(3401) %>% as('Spatial') %>% 
+  variogram(resid~1, data=.,width=2000) %>% 
+  ggplot()+geom_line(aes(x=dist,y=gamma))+
+  labs(x='Distance',y='Semivariance')
+
+chlorDat %>% filter(date_img==last(date_img)) %>% 
+  select(YEID,date_img,resid) %>% 
+  st_transform(3401) %>% as('Spatial') %>% 
+  variogram(resid~1, data=.,width=2000) %>% 
+  ggplot()+geom_line(aes(x=dist,y=gamma))+
+  labs(x='Distance',y='Semivariance')
+
+#Spatial autocorr (Moran's I) at each day - strong spatial autocorrelation
+m <- sapply(sort(unique(chlorDat$date_img)),function(i){
+  temp <- chlorDat %>% filter(date_img==i)
+  
+  if(nrow(temp)<=5) return(NA)
+  
+  d <- temp %>% st_distance()
+  units(d) <- NULL
+  d <- 1000*d/max(d) #Change to km
+  d <- 1/d #inverse
+  diag(d) <- 0
+  r <- temp %>% pull(resid) #Residuals
+  if(sum(!is.finite(d))>0){ #IF NA/Inf (sites at same location)
+    notFinite <- which(apply(d,2,function(x) as.logical(sum(!is.finite(x)))))[-1]
+    d <- d[-notFinite,-notFinite] #Remove rows with NA/Inf
+    r <- r[-notFinite]
+  }
+  if(!is.finite(Moran.I(r,d)$p.value)) stop('NaN value')
+  
+  return(Moran.I(r,d)$p.value)
+})
+m <- m[!is.na(m)] #Remove NAs
+sum(m<(0.05/length(m)))/length(m) #73% of days show evidence of spatial autocorrelation
+
+#Temporal autocorrelation (Durbin-Watson) at each location - uses order rather than day
+n <- sapply(unique(chlorDat$YEID),function(i){
+  temp <- chlorDat %>% filter(YEID==i) %>% dwtest(resid~1,data=.)
+  return(temp$p.value)
+})
+sum(n<(0.05/length(n)))/length(n) #Not much
+
+# #ACF of residuals. Creates ts() object with NAs in missing days
+# temp <- chlorDat %>% filter(YEID==last(YEID)) %>% st_drop_geometry() %>% mutate(doy=1+doy-min(doy))
+# r <- rep(NA,max(temp$doy))
+# r[temp$doy] <- temp$resid
+# a <- acf(r,na.action = na.pass,type='partial',lag.max=30)
+# 
+# r <- ts(r,start=1,end=length(r))
+# ar(r,na.action='na.pass')
+# Box.test(r)
+
+#Empirical ST variogram of residuals
+a <- Sys.time()
+vv <- chlorDat %>% slice_sample(n=1000) %>% 
+  st_drop_geometry() %>% 
+  stConstruct(x=.,space=c('E','N'),time='date_img') %>% 
+  variogramST(resid~1, #Takes about 2 mins if using 1000 data points, width=2000, tlags= 100, cores =10
+            data=.,
+            width=10000,
+            tlags=seq(0,30,by=1),cores = 10,tunit='days')
+Sys.time()-a
+
+vv %>% 
+  ggplot(aes(x=spacelag/1000,y=timelag,fill=gamma))+geom_raster() +
+  labs(x='Distance (km)',y='Time (days)',fill='Semi-\nvariance')
+
+
 
 # #Try larger tensor product (10x10x10).  What has 500 more coefficients gotten us?
 # chlorMod2 <- gam(logChlor~te(sN,sE,doy,k=10),data=chlorDat)  #Better AIC, but residual checks are about the same.
@@ -314,6 +403,19 @@ p2 <- data.frame(lag=lags,surface=sapply(modList,function(i) summary(i$surface)$
 
 ggarrange(p1,p2,ncol=1)
 
+#Take a look at model on day -11
+par(mfrow=c(2,1))
+dayLag <- which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))
+bestMod <- modList[[dayLag]]$bottom #Bottom water model
+with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Bottom DO'))
+abline(bestMod) #Fairly good relationship (not linear, but OK for now)
+
+dayLag <- which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))
+bestMod <- modList[[dayLag]]$surface #Surface water model
+with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Surface DO'))
+abline(bestMod) #No real relationship
+par(mfrow=c(1,1))
+
 # NOTES:
 # Looks like surface water DO is more poorly predicted by chlor_a. However, lower MSE, so probably just less variable overall
 # Strangely, future chlor_a is a slightly better predictor than past chlor_a. What is going on here?
@@ -321,26 +423,57 @@ ggarrange(p1,p2,ncol=1)
 # 1) Just a weird dataset, and won't show up in future years
 # 2) Some thing is actually causing a DO drop, followed by an increase in chlor_a
 
-#Take a look at model on day -11
-dayLag <- which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))
-bestMod <- modList[[dayLag]]$bottom #Bottom water model
-with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='DO'))
-abline(bestMod)
-
-#
-rm(bWatTemp,sWatTemp)
-
-dayLag <- which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))
-bestMod <- modList[[dayLag]]$bottom #Bottom water model
-with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='DO'))
-abline(bestMod)
-
 
 #Trying functional regression using lagged predictions
-fdat <- list(
-  
-)
 
+NdayLag <- 50 #30 days in past
+NdayForward <- 50 #20 days in future
+dayLags <- -NdayForward:NdayLag
 
+#Matrix to store chlor_a predictions for past 0:30 days
+predChlorMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
+                       dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
+
+for(i in 1:nrow(bottomWDat)){
+  getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags
+  predChlorMat[i,] <- predChlor$pred[predChlor$YEID == bottomWDat$YEID[i] & predChlor$doy %in% getDays]
+}
+
+#Data for functional regression
+fdat <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
+          dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
+          chlorMat=predChlorMat,
+          doy=bottomWDat$doy,sE=bottomWDat$sE,sN=bottomWDat$sN,
+          maxDepth=bottomWDat$maxDepth)
+
+#Fit FDA models - looks slightly better, but still only gets R2 of 0.3, so not much better than simple lag model
+bWatMod <- gam(DO_bottom ~ s(dayMat,by=chlorMat), data=fdat) #Bottom water
+summary(bWatMod)
+par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
+plot(bWatMod,scheme=1,pages=1); abline(h=0,col='red')
+
+data.frame(pred=predict(bWatMod),actual=fdat$DO_bottom) %>% 
+  ggplot()+geom_point(aes(x=pred,y=actual))+
+  geom_abline(intercept = 0, slope = 1)+
+  labs(x='Predicted Bottom DO',y='Actual Bottom DO')
+
+p1 <- bottomWDat %>% mutate(resid=resid(bWatMod)) %>% st_jitter(factor=0.01) %>% 
+  ggplot()+geom_sf(aes(geometry=geometry,col=resid,size=abs(resid)),alpha=0.5)+
+  scale_colour_distiller(type='div',palette = "RdBu")+theme(legend.position='bottom')+
+  guides(size=FALSE)
+p2 <- bottomWDat %>% mutate(resid=resid(bWatMod)) %>% ggplot()+geom_point(aes(x=doy,y=resid))+geom_hline(yintercept = 0)
+ggarrange(p1,p2,ncol=1)
+
+sWatMod <- gam(DO_surf ~ s(dayMat,by=chlorMat), data=fdat) #Surface water DO
+summary(sWatMod)
+par(mfrow=c(2,2)); gam.check(sWatMod); abline(0,1,col='red'); par(mfrow=c(1,1))
+plot(sWatMod,pages=1,scheme=1); abline(h=0,col='red') 
+
+p1 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% st_jitter(factor=0.01) %>% 
+  ggplot()+geom_sf(aes(geometry=geometry,col=resid,size=abs(resid)),alpha=0.5)+
+  scale_colour_distiller(type='div',palette = "RdBu")+theme(legend.position='bottom')+
+  guides(size=FALSE)
+p2 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% ggplot()+geom_point(aes(x=doy,y=resid))+geom_hline(yintercept = 0)
+ggarrange(p1,p2,ncol=1)
 
 
