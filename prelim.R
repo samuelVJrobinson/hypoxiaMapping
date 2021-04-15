@@ -425,9 +425,8 @@ par(mfrow=c(1,1))
 
 
 #Trying functional regression using lagged predictions
-
-NdayLag <- 50 #30 days in past
-NdayForward <- 50 #20 days in future
+NdayLag <- 30 #30 days in past
+NdayForward <- 0 #20 days in future
 dayLags <- -NdayForward:NdayLag
 
 #Matrix to store chlor_a predictions for past 0:30 days
@@ -476,4 +475,6 @@ p1 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% st_jitter(factor=0.01) %>%
 p2 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% ggplot()+geom_point(aes(x=doy,y=resid))+geom_hline(yintercept = 0)
 ggarrange(p1,p2,ncol=1)
 
+#To try:
+#PCA of chlor_a, nflh, poc + other channels
 
