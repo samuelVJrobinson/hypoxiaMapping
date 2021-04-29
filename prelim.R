@@ -133,12 +133,13 @@ sDat_pca_imputed <- imputePCA(sDat_pca,ncp=4,scale=TRUE,method='Regularized') #I
 # head(sDat_pca_imputed$completeObs)
 # head(sDat_pca_imputed$fittedX) #Not sure what this part is ("reconstructed data", but how is this different from completeObs?)
 pca2 <- prcomp(sDat_pca_imputed$completeObs,scale=TRUE) #Get PCA values
+# plot(cumsum(pca2$sdev^2)/sum(pca2$sdev^2),type='b')
 
 #Join imputed PCA values back to original dataset (NA if no data on that day)
 sDat_pca <- pca2$x[,1:4] %>% as.data.frame() %>% rownames_to_column('ID')
 sDat <- sDat %>% unite(ID,YEID,date_img,sep=':',remove=FALSE) %>% left_join(sDat_pca,by='ID') %>% 
   select(-ID)
-rm(sDat_pca,pca2,sDat_pca_imputed,sDatMat,pca) #Cleanup
+rm(sDat_pca,sDat_pca_imputed) #cleanup
 
 # Take a look at water data ---------------------
 
@@ -581,12 +582,27 @@ ggarrange(p1,p2,ncol=1)
 
 # Fit GAMs of PC1:PC4 ----------------------------------------------------------
 
-pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) #Strips out missing data
+load('./data/PCmods.RData')
 
-PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+# pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
+#   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
+
+# PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+# PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+# PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(40,10),d=c(2,1)),data=pcDat) #Hessian non-positive definite
+# PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(40,10),d=c(2,1)),data=pcDat) #Hessian non-positive definite
+# save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,file='./data/PCmods.RData')
+
+par(mfrow=c(2,2)); 
+gam.check(PCmod1); abline(0,1,col='red'); 
+gam.check(PCmod2); abline(0,1,col='red'); 
+gam.check(PCmod3); abline(0,1,col='red'); 
+gam.check(PCmod4); abline(0,1,col='red'); 
+par(mfrow=c(1,1))
+
+# #Haven't gotten this to complete fitting yet. Also doesn't account for spatial correlation
+# PCmod1 <-gamm(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat,
+#               correlation=corExp(form=~sN+sE,nugget=TRUE))
 
 summary(PCmod1)
 summary(PCmod2)
@@ -602,21 +618,40 @@ predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=uni
   mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
 
-predPC %>% select(date,sE,sN,contains('pred')) %>% 
+#Predicted values
+p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>% 
   pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>% 
   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
   facet_grid(name~date)+
-  scale_colour_distiller(type='div',palette = "Greens",direction=1)+
-  labs(x='E',y='N',col='Predicted PC Value')+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+  labs(x='E',y='N',col='PC Value',title='Predicted value')+
   theme(legend.position='bottom')
 
-predPC %>% select(date,sE,sN,contains('sePC')) %>% 
+#SE of prediction
+p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>% 
   pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
   facet_grid(name~date)+
   scale_colour_distiller(type='div',palette = "Reds",direction=1)+
-  labs(x='E',y='N',col='SE PC Value')+
+  labs(x='E',y='N',col='SE of PC Value',title='Standard error of Prediction')+
   theme(legend.position='bottom')
+
+#Residual plots
+p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),residPC4=resid(PCmod4)) %>% 
+  pivot_longer(contains('residPC')) %>% mutate(name=gsub('residPC','PC',name)) %>% 
+  mutate(date=dateCut(date_img,9)) %>% 
+  ggplot()+geom_point(aes(x=sE,y=sN,col=value,alpha=abs(value),size=abs(value)))+
+  facet_grid(name~date)+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=1)+
+  scale_alpha_continuous(range=c(0.01,0.75))+
+  labs(x='E',y='N',col='Residual',title='Residual plot')+
+  theme(legend.position='bottom')
+
+ggsave('./figures/prelimFigs/PCAmod_pred.png',p1,width=8,height=6)
+ggsave('./figures/prelimFigs/PCAmod_se.png',p2,width=8,height=6)
+ggsave('./figures/prelimFigs/PCAmod_resid.png',p3,width=8,height=6)
+
+#Fit model of DO to (predicted) PCAs ----------------------------------
 
 #Get predictions at all locations through the entire season
 predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>% 
@@ -627,7 +662,7 @@ predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>%
   mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
 
-lags <- -40:40 #Try -40 to 40 day lags (negative = days after, positive = days before)
+lags <- 0:40 #Try -40 to 40 day lags (negative = days after, positive = days before)
 modList <- lapply(lags,function(i){
   sWatTemp <- surfWDat #Copies of water data
   bWatTemp <- bottomWDat 
@@ -637,19 +672,23 @@ modList <- lapply(lags,function(i){
     select(contains('predPC')) %>% bind_cols(sWatTemp)
   bWatTemp <- predPC %>% filter(chooseThis) %>% 
     select(contains('predPC')) %>% bind_cols(bWatTemp)
-  #Fit simple linear models use PC1:4
-  sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=sWatTemp)
-  bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=bWatTemp)
+  # #Fit simple linear models use PC1:4
+  # sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=sWatTemp)
+  # bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=bWatTemp)
+  
+  # Slightly better prediction using interactions (R2: 0.47 vs 0.36, MSE: 353 vs 455)
+  sMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=sWatTemp)
+  bMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=bWatTemp)
   return(list(surface=sMod,bottom=bMod))
 })
 
 #Get plots of MSE and R-squared
-p1 <- data.frame(lag=lags,surface=sapply(modList,function(i) sum(resid(i$surface)^2)),
-                 bottom=sapply(modList,function(i) sum(resid(i$bottom)^2))) %>% 
+p1 <- data.frame(lag=lags,surface=sapply(modList,function(i) mean(abs(resid(i$surface)))),
+                 bottom=sapply(modList,function(i) mean(abs(resid(i$bottom))))) %>% 
   pivot_longer(surface:bottom) %>% 
   ggplot()+geom_line(aes(x=lag,y=value))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='Mean Squared Error')
+  labs(x='Time lag',y='Mean Absolute Error')
 
 p2 <- data.frame(lag=lags,surface=sapply(modList,function(i) summary(i$surface)$r.squared),
                  bottom=sapply(modList,function(i) summary(i$bottom)$r.squared)) %>% 
@@ -659,22 +698,29 @@ p2 <- data.frame(lag=lags,surface=sapply(modList,function(i) summary(i$surface)$
   labs(x='Time lag',y='R-squared')
 ggarrange(p1,p2,ncol=1) 
 
-#Best MSE/R2 for bottom DO 6 days in the past, 21 days in future for surface DO
+#Best MSE/R2 for bottom DO 6 days in the past, 20 days in future for surface DO
 lags[which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))]
 lags[which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))]
 
-#Take a look at bottom DO model on day 6
+#Take a look at both models
 par(mfrow=c(2,1))
 dayLag <- which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))
 bestMod <- modList[[dayLag]]$bottom #Bottom water model
-with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Bottom DO'))
-abline(bestMod) #Fairly good relationship (not linear, but OK for now)
+plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Bottom DO (',lags[dayLag],' day lag)'))
+abline(0,1) #Fairly good relationship (not linear, but OK for now)
 
 dayLag <- which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))
 bestMod <- modList[[dayLag]]$surface #Surface water model
-with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Surface DO'))
-abline(bestMod) #No real relationship
+plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Surface DO (',lags[dayLag],' day lag)'))
+abline(0,1) #No real relationship
 par(mfrow=c(1,1))
 
+#Get best models
+bottomMod <- modList[[which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))]]$bottom #Bottom water model
+surfaceMod <- modList[[which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))]]$surface #surface water model
 
+summary(bottomMod)
+par(mfrow=c(2,1)); plot(bottomMod,which=c(1,2)); par(mfrow=c(1,1)) #Not too bad here
+par(mfrow=c(2,1)); plot(surfaceMod,which=c(1,2)); par(mfrow=c(1,1)) #Problems here
 
+#Next step: functional regression
