@@ -9,13 +9,17 @@ library(ggmap)
 library(ggpubr)
 library(animation)
 library(mgcv)
+library(vegan)
+library(missMDA)
+library(gstat)
 
 setwd("~/Documents/hypoxiaMapping")
 
 source('helperFunctions.R')
 
 #Water data
-wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% mutate(doy=as.numeric(format(Date,format='%j'))) %>% 
+wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>% 
+  mutate(doy=as.numeric(format(Date,format='%j'))) %>% 
   # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
   group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
   select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>% 
@@ -33,6 +37,26 @@ wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y
 
 #Get locations from wDat to join onto spatial data
 locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct() 
+
+#Changes negative values to scaleVal proportion of lowest positive value
+fixNeg <- function(x,scaleVal=0.5) ifelse(x<0,scaleVal*min(x[x>0],na.rm=TRUE),x)
+#Adds minimum value + minimum values * scaleVal 
+fixNeg2 <- function(x,scaleVal=(1+1e-3)) x+abs(min(x,na.rm=TRUE))*scaleVal
+#Linear rescaling between lwr and upr
+rescale <- function(x,lwr=NA,upr=NA){
+  if(is.na(lwr)&is.na(upr)) return(x)
+  if(is.na(lwr)) lwr <- min(x,na.rm=TRUE)
+  if(is.na(upr)) upr <- max(x,na.rm=TRUE)
+  oldlwr <- min(x,na.rm=TRUE)
+  oldupr <- max(x,na.rm=TRUE)
+  oldcenter <- mean(c(oldlwr,oldupr))
+  oldrng <- oldupr-oldlwr
+  x <- (x-oldcenter)/oldrng
+  center <- mean(c(lwr,upr)) #New midpoint
+  rng <- upr-lwr #New range
+  x <- (x*rng)+center #New data
+  return(x)
+}
   
 #Spectral data
 sDat <- read.csv('./data/sample_spectralData.csv') %>% 
@@ -40,8 +64,11 @@ sDat <- read.csv('./data/sample_spectralData.csv') %>%
   select(-Date,-doy) %>% 
   st_as_sf() %>% 
   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>% 
-  mutate(nflh=ifelse(nflh<0,0,ifelse(nflh>1,1,nflh))) %>% #Limits nflh to between 0 and 1
-  mutate(poc=ifelse(nflh<0,1,poc)) #Changes negative poc to 1 (really low)
+  # mutate(across(chlor_a:poc,fixNeg2)) %>%  #Change negative values to 95% of smallest + values
+  # mutate(nflh=ifelse(nflh>1,1,nflh)) #Limits nflh to less than 1
+  mutate(poc=ifelse(poc>quantile(poc,0.008,na.rm=TRUE),poc,quantile(poc,0.008,na.rm=TRUE))) %>% 
+  mutate(nflh=rescale(fixNeg(nflh,0.95),1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
+  mutate(across(chlor_a:Rrs_678,~rescale(.x,lwr=min(.x[.x>0],na.rm=TRUE)*0.99,upr=NA)))  #Rescales values to above 0.99*min + value
 
 #Not sure what the other channels are, so removing them for now, and stripping out data-less days
 sDat2 <- sDat %>% select(YEID,date_img,doy,chlor_a:poc,E:geometry) %>% 
@@ -62,6 +89,56 @@ surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungrou
 #choose only bottom water
 bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>% 
   filter(depthOrd==1) %>% select(-depthOrd)
+
+#Principal components of spectral data
+
+# #Remove NA values
+# sDat_pca <- sDat %>% select(YEID:Rrs_678) %>% na.omit() 
+# nrow(sDat_pca)/nrow(sDat) #About 20% of data (9363 rows) remaining. 
+# 
+# #Matrix form
+# sDatMat <- sDat_pca %>% st_drop_geometry() %>% unite(ID,YEID,date_img) %>% remove_rownames() %>% 
+#   column_to_rownames(var='ID') %>% 
+#   mutate(across(everything(),log)) %>% #Log-scale variables
+#   as.matrix() 
+# 
+# pairs(sDatMat[sample(1:nrow(sDatMat),size=500),],upper.panel=panel.cor,diag.panel=panel.hist)
+# 
+# #Get principal components
+# pca <- prcomp(sDatMat,scale=TRUE)
+# sum(pca$sdev^2) #13, because 13 variables were standarized
+# screeplot(pca)
+# barplot(pca$sdev^2/sum(pca$sdev^2),ylab='Var',xlab='Principal Component',pch=19)
+# plot(cumsum(pca$sdev^2)/sum(pca$sdev^2),ylab='Var - Cumulative',xlab='Principal Component',pch=19,type='b')
+# pca$rotation #Factor loadings
+
+# #Singular value decomposition
+# svdMat <- svd(scale(sDatMat)) #First 2 dimensions 
+# plot(svdMat$d^2/sum(svdMat$d^2),ylab='Relative variance',xlab='Eigenvalue',pch=19)
+# plot(log(pca$sdev),log(svdMat$d)) #Similar things
+
+#Could do imputation for missing data?
+# Examples: https://link.springer.com/article/10.1007/s11258-014-0406-z
+# http://juliejosse.com/wp-content/uploads/2018/05/DataAnalysisMissingR.html
+
+sDat_pca <- sDat %>% select(YEID:Rrs_678) %>% st_drop_geometry() %>% 
+  unite(ID,YEID,date_img,sep=':') %>% remove_rownames() %>% 
+  column_to_rownames(var='ID') %>% mutate(across(everything(),log)) %>% 
+  filter(apply(.,1,function(x) sum(is.na(x)))!=13) #Remove completely missing rows
+# head(sDat_pca)
+# n_components <- estim_ncpPCA(sDat_pca, method.cv='gcv',verbose = TRUE,method="Regularized",ncp.max=8)
+# plot(n_components$criterion) #Looks like about 4 components is OK for prediction
+sDat_pca_imputed <- imputePCA(sDat_pca,ncp=4,scale=TRUE,method='Regularized') #Impute missing values
+# head(sDat_pca) #Compare to original
+# head(sDat_pca_imputed$completeObs)
+# head(sDat_pca_imputed$fittedX) #Not sure what this part is ("reconstructed data", but how is this different from completeObs?)
+pca2 <- prcomp(sDat_pca_imputed$completeObs,scale=TRUE) #Get PCA values
+
+#Join imputed PCA values back to original dataset (NA if no data on that day)
+sDat_pca <- pca2$x[,1:4] %>% as.data.frame() %>% rownames_to_column('ID')
+sDat <- sDat %>% unite(ID,YEID,date_img,sep=':',remove=FALSE) %>% left_join(sDat_pca,by='ID') %>% 
+  select(-ID)
+rm(sDat_pca,pca2,sDat_pca_imputed,sDatMat,pca) #Cleanup
 
 # Take a look at water data ---------------------
 
@@ -122,8 +199,11 @@ wDat %>% st_drop_geometry() %>%
 sDat
 head(sDat)
 
-p <- sDat %>% select(YEID:poc) %>% pivot_longer(c(chlor_a:poc)) %>% filter(!is.na(value)) %>% 
-  ggplot()+geom_point(aes(x=date_img,y=value))+facet_wrap(~name,ncol=1,scales='free_y')+
+p <- sDat %>% select(YEID:poc,PC1:PC4) %>% 
+  pivot_longer(c(chlor_a:poc,PC1:PC4)) %>% 
+  filter(!is.na(value)) %>% 
+  mutate(name=factor(name,levels=c('chlor_a','nflh','poc','PC1','PC2','PC3','PC4'))) %>% 
+  ggplot()+geom_point(aes(x=date_img,y=value))+facet_wrap(~name,ncol=2,scales='free_y')+
   geom_vline(xintercept=range(wDat$Date),col='red',linetype='dashed') #Range of water data
 ggsave('./figures/prelimFigs/sDat_overall_ts.png',p,width=8,height=8)
 
@@ -156,6 +236,34 @@ gen_anim <- function() { #Generate set of frames
 
 setwd("~/Documents/hypoxiaMapping/figures/prelimFigs")
 saveGIF(gen_anim(),movie.name='spectral_anim.gif',interval = 0.5,ani.width=600,ani.height=900)
+setwd("~/Documents/hypoxiaMapping")
+
+#Same, but for PCA axes
+gen_anim <- function() { #Generate set of frames
+  mapFun <- function(tau) { #Function to make single frame
+    s <- sDat %>% filter(date_img == tau) #subset data to time step tau
+    f <- function(dat,channel,lims){ #Function to make standard figure
+      ggmap(basemap) + geom_sf(data=dat,aes(geometry=geometry,colour = {{channel}},size={{channel}}),inherit.aes = FALSE) +
+        guides(size=FALSE)+
+        scale_size(limits=lims)+
+        scale_colour_distiller(limits=lims,type='div',palette = "YlOrBr",na.value=NA)
+    }
+    p1 <- f(s,PC1,range(sDat$PC1,na.rm=TRUE))
+    p2 <- f(s,PC2,range(sDat$PC2,na.rm=TRUE))
+    p3 <- f(s,PC3,range(sDat$PC3,na.rm=TRUE))
+    p4 <- f(s,PC4,range(sDat$PC4,na.rm=TRUE))
+    p <- ggarrange(p1,p2,p3,p4,ncol=1)
+    p <- annotate_figure(p,top = text_grob(as.character(tau),size=10))
+    return(p)
+  }
+  mapFun(tau=sDat2$date_img[1])
+  
+  for(t in 1:length(unique(sDat2$date_img))){  # for each time point
+    print(mapFun(tau=unique(sDat2$date_img)[t]))   # plot data at this time point
+  }
+}
+setwd("~/Documents/hypoxiaMapping/figures/prelimFigs")
+saveGIF(gen_anim(),movie.name='spectral_anim_PCA.gif',interval = 0.5,ani.width=600,ani.height=900)
 setwd("~/Documents/hypoxiaMapping")
 
 #Hard to see distinct patterns using animations, but it looks like there are "pulses" here and there
@@ -254,28 +362,27 @@ chlorDat %>% mutate(cDate=dateCut(date_img,12)) %>%
 
 #Variogram of residuals
 
-library(gstat) #Spatial-only variogram
-
 #Overall spatial autocorrelation
-select(chlorDat,YEID,date_img,resid) %>% 
+p1 <- select(chlorDat,YEID,date_img,resid) %>% 
   st_transform(3401) %>% as('Spatial') %>% 
   variogram(resid~1, data=.,width=2000) %>% 
   ggplot()+geom_line(aes(x=dist,y=gamma))+
-  labs(x='Distance',y='Semivariance')
-
-chlorDat %>% filter(date_img==first(date_img)) %>% 
+  labs(x='Distance',y='Semivariance',title='Overall')
+#First day
+p2 <- chlorDat %>% filter(date_img==first(date_img)) %>% 
   select(YEID,date_img,resid) %>% 
   st_transform(3401) %>% as('Spatial') %>% 
   variogram(resid~1, data=.,width=2000) %>% 
   ggplot()+geom_line(aes(x=dist,y=gamma))+
-  labs(x='Distance',y='Semivariance')
-
-chlorDat %>% filter(date_img==last(date_img)) %>% 
+  labs(x='Distance',y='Semivariance',title='First Day')
+#Last day
+p3 <- chlorDat %>% filter(date_img==last(date_img)) %>% 
   select(YEID,date_img,resid) %>% 
   st_transform(3401) %>% as('Spatial') %>% 
   variogram(resid~1, data=.,width=2000) %>% 
   ggplot()+geom_line(aes(x=dist,y=gamma))+
-  labs(x='Distance',y='Semivariance')
+  labs(x='Distance',y='Semivariance',title='Last Day')
+ggarrange(p1,p2,p3,nrow=3)
 
 #Spatial autocorr (Moran's I) at each day - strong spatial autocorrelation
 m <- sapply(sort(unique(chlorDat$date_img)),function(i){
@@ -294,16 +401,16 @@ m <- sapply(sort(unique(chlorDat$date_img)),function(i){
     d <- d[-notFinite,-notFinite] #Remove rows with NA/Inf
     r <- r[-notFinite]
   }
-  if(!is.finite(Moran.I(r,d)$p.value)) stop('NaN value')
+  if(!is.finite(ape::Moran.I(r,d)$p.value)) stop('NaN value')
   
-  return(Moran.I(r,d)$p.value)
+  return(ape::Moran.I(r,d)$p.value)
 })
 m <- m[!is.na(m)] #Remove NAs
-sum(m<(0.05/length(m)))/length(m) #73% of days show evidence of spatial autocorrelation
+sum(m<(0.05/length(m)))/length(m) #73% of days show evidence of spatial autocorrelation in residuals
 
 #Temporal autocorrelation (Durbin-Watson) at each location - uses order rather than day
 n <- sapply(unique(chlorDat$YEID),function(i){
-  temp <- chlorDat %>% filter(YEID==i) %>% dwtest(resid~1,data=.)
+  temp <- chlorDat %>% filter(YEID==i) %>% lmtest::dwtest(resid~1,data=.)
   return(temp$p.value)
 })
 sum(n<(0.05/length(n)))/length(n) #Not much
@@ -332,8 +439,6 @@ Sys.time()-a
 vv %>% 
   ggplot(aes(x=spacelag/1000,y=timelag,fill=gamma))+geom_raster() +
   labs(x='Distance (km)',y='Time (days)',fill='Semi-\nvariance')
-
-
 
 # #Try larger tensor product (10x10x10).  What has 500 more coefficients gotten us?
 # chlorMod2 <- gam(logChlor~te(sN,sE,doy,k=10),data=chlorDat)  #Better AIC, but residual checks are about the same.
@@ -423,7 +528,6 @@ par(mfrow=c(1,1))
 # 1) Just a weird dataset, and won't show up in future years
 # 2) Some thing is actually causing a DO drop, followed by an increase in chlor_a
 
-
 #Trying functional regression using lagged predictions
 NdayLag <- 30 #30 days in past
 NdayForward <- 0 #20 days in future
@@ -475,6 +579,102 @@ p1 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% st_jitter(factor=0.01) %>%
 p2 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% ggplot()+geom_point(aes(x=doy,y=resid))+geom_hline(yintercept = 0)
 ggarrange(p1,p2,ncol=1)
 
-#To try:
-#PCA of chlor_a, nflh, poc + other channels
+# Fit GAMs of PC1:PC4 ----------------------------------------------------------
+
+pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) #Strips out missing data
+
+PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+
+summary(PCmod1)
+summary(PCmod2)
+summary(PCmod3) #Not as good
+summary(PCmod4) #Also not so good
+
+#See how predictions look on spatial grid
+predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
+  separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>% 
+  mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
+
+predPC %>% select(date,sE,sN,contains('pred')) %>% 
+  pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>% 
+  ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
+  facet_grid(name~date)+
+  scale_colour_distiller(type='div',palette = "Greens",direction=1)+
+  labs(x='E',y='N',col='Predicted PC Value')+
+  theme(legend.position='bottom')
+
+predPC %>% select(date,sE,sN,contains('sePC')) %>% 
+  pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
+  ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
+  facet_grid(name~date)+
+  scale_colour_distiller(type='div',palette = "Reds",direction=1)+
+  labs(x='E',y='N',col='SE PC Value')+
+  theme(legend.position='bottom')
+
+#Get predictions at all locations through the entire season
+predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>% 
+  left_join(select(locIndex,-doy,-Date),by='YEID') %>% #Join in spatial info
+  mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
+
+lags <- -40:40 #Try -40 to 40 day lags (negative = days after, positive = days before)
+modList <- lapply(lags,function(i){
+  sWatTemp <- surfWDat #Copies of water data
+  bWatTemp <- bottomWDat 
+  chooseThis <- predPC$YEID==sWatTemp$YEID & predPC$doy==(sWatTemp$doy-i) #Location of lagged chlor predictions
+  #Join PCA values onto copies of water data
+  sWatTemp <- predPC %>% filter(chooseThis) %>% 
+    select(contains('predPC')) %>% bind_cols(sWatTemp)
+  bWatTemp <- predPC %>% filter(chooseThis) %>% 
+    select(contains('predPC')) %>% bind_cols(bWatTemp)
+  #Fit simple linear models use PC1:4
+  sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=sWatTemp)
+  bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=bWatTemp)
+  return(list(surface=sMod,bottom=bMod))
+})
+
+#Get plots of MSE and R-squared
+p1 <- data.frame(lag=lags,surface=sapply(modList,function(i) sum(resid(i$surface)^2)),
+                 bottom=sapply(modList,function(i) sum(resid(i$bottom)^2))) %>% 
+  pivot_longer(surface:bottom) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value))+
+  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+  labs(x='Time lag',y='Mean Squared Error')
+
+p2 <- data.frame(lag=lags,surface=sapply(modList,function(i) summary(i$surface)$r.squared),
+                 bottom=sapply(modList,function(i) summary(i$bottom)$r.squared)) %>% 
+  pivot_longer(surface:bottom) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value))+
+  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+  labs(x='Time lag',y='R-squared')
+ggarrange(p1,p2,ncol=1) 
+
+#Best MSE/R2 for bottom DO 6 days in the past, 21 days in future for surface DO
+lags[which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))]
+lags[which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))]
+
+#Take a look at bottom DO model on day 6
+par(mfrow=c(2,1))
+dayLag <- which.min(sapply(modList,function(i) sum(resid(i$bottom)^2)))
+bestMod <- modList[[dayLag]]$bottom #Bottom water model
+with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Bottom DO'))
+abline(bestMod) #Fairly good relationship (not linear, but OK for now)
+
+dayLag <- which.min(sapply(modList,function(i) sum(resid(i$surface)^2)))
+bestMod <- modList[[dayLag]]$surface #Surface water model
+with(bestMod$model,plot(lagChlor,DO,xlab=paste0('Chlor_a at day ',lags[dayLag]),ylab='Surface DO'))
+abline(bestMod) #No real relationship
+par(mfrow=c(1,1))
+
+
 
