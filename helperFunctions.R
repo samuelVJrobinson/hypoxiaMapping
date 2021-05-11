@@ -59,3 +59,38 @@ panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...){
   text(0.5, 0.5, txt, cex = cex.cor * abs(r),col=ifelse(r>0,'black','red'))
 }
 
+#Extract data for partial effects plots of smoothing terms
+# dat = dataframe of predictor data (think "newdata" from predict.gam) + column of ones with title of "by" matrix (if doing functional regression)
+#   * must have the same name as predictors
+# m = GAM model
+# whichSmooth = smoothing terms to use; all terms are aggregated (useful for interaction plots)
+#   if numeric (vector/scalar), gets smooths in order stored in gam model. If character (vector/scalar), matches label exactly
+# ci = multiplicitive factor for SE bounds (default = 1.96)
+smoothPred <- function(dat,m,whichSmooth,ci=1.96){ 
+  if(!(class(whichSmooth) %in% c('character','numeric','integer'))){
+    stop('whichSmooth must be character, numeric, or integer')
+  }
+  
+  if(is.character(whichSmooth)){ #Converts whichSmooth to numeric index, if in character form
+    whichSmooth <- which(whichSmooth %in% sapply(m$smooth,function(x) x$label))
+  }
+  
+  #Are "by" variables missing?
+  byVars <- sapply(whichSmooth,function(x) m$smooth[[x]]$by)
+  missByVar <- any(!byVars[byVars!='NA'] %in% names(dat))
+  if(missByVar) stop(paste0('by variable(s) not specified. Possible names: ',byVars[byVars!='NA']))
+  
+  #Predictor matrices
+  predMat <- lapply(whichSmooth,function(i) PredictMat(m$smooth[[i]],data=dat)) #Get predictor matrices from each smoother, using dat
+  predMat <- do.call('cbind',predMat) #Amalgamate into single matrix
+  #Coefficients
+  coefRange <- do.call('c',lapply(m$smooth[whichSmooth],function(x) x$first.para:x$last.para)) #Get coefficients to use
+  coefs <- coef(m)[coefRange] #Extract coefficient values
+  #Predicted value - predictor matrix X coefficients
+  dat$pred <- predMat %*% coefs
+  #SE - swiped from plot.gam code
+  dat$se <- sqrt(pmax(0,rowSums(predMat %*% m$Vp[coefRange,coefRange] * predMat)))
+  #Confidence intervals
+  dat$upr <- dat$pred + dat$se*ci; dat$lwr <- dat$pred - dat$se*ci 
+  return(dat) #Return entire dataframe
+}
