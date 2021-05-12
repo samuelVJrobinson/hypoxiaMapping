@@ -123,19 +123,31 @@ bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing
 
 #I think some combination of spectral + spatiotemporal imputation would be best, but that's much more complicated
 
-sDat_pca <- sDat %>% select(YEID:Rrs_678) %>% st_drop_geometry() %>% 
+sDat_pca <- sDat %>% select(YEID:sst) %>% st_drop_geometry() %>% 
   unite(ID,YEID,date_img,sep=':') %>% remove_rownames() %>% 
   column_to_rownames(var='ID') %>% mutate(across(everything(),log)) %>% 
-  filter(apply(.,1,function(x) sum(is.na(x)))!=13) #Remove completely missing rows
-# head(sDat_pca)
-# n_components <- estim_ncpPCA(sDat_pca, method.cv='gcv',verbose = TRUE,method="Regularized",ncp.max=8)
-# plot(n_components$criterion) #Looks like about 4 components is OK for prediction
+  filter(apply(.,1,function(x) sum(is.na(x)))!=14) #Remove completely missing rows
+head(sDat_pca)
+# n_components <- estim_ncpPCA(sDat_pca, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=8) #Takes a long time (20 mins?)
+# plot(1:8,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 4 components is OK for prediction
 sDat_pca_imputed <- imputePCA(sDat_pca,ncp=4,scale=TRUE,method='Regularized') #Impute missing values
 # head(sDat_pca) #Compare to original
 # head(sDat_pca_imputed$completeObs)
 # head(sDat_pca_imputed$fittedX) #Not sure what this part is ("reconstructed data", but how is this different from completeObs?)
 pca2 <- prcomp(sDat_pca_imputed$completeObs,scale=TRUE) #Get PCA values
-# plot(cumsum(pca2$sdev^2)/sum(pca2$sdev^2),type='b')
+plot(1:length(pca2$sdev),cumsum(pca2$sdev^2)/sum(pca2$sdev^2),type='b',xlab='Principle Component',ylab='Cumulative Variance')
+#95% of var taken up by first 4 dimensions
+
+#Factor loadings of first 4 PCs
+pca2$rotation[,1:4] %>% data.frame() %>% rownames_to_column(var='var') %>% 
+  pivot_longer(PC1:PC4) %>% 
+  mutate(name=factor(name,labels=paste0('PC',1:4,': ',round(pca2$sdev[1:4]^2/sum(pca2$sdev^2),3)*100,'% Variance'))) %>% 
+  mutate(var=factor(var,levels=rev(unique(var)))) %>% 
+  ggplot()+
+  # geom_point(aes(y=var,x=value))+
+  geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
+  facet_wrap(~name)+
+  labs(x='Loading',y=NULL,title='Variable loadings for Principle Components 1-4')
 
 #Join imputed PCA values back to original dataset (NA if no data on that day)
 sDat_pca <- pca2$x[,1:4] %>% as.data.frame() %>% rownames_to_column('ID')
@@ -585,7 +597,7 @@ ggarrange(p1,p2,ncol=1)
 
 # Fit GAMs of PC1:PC4 ----------------------------------------------------------
 
-load('./data/PCmods.RData')
+# load('./data/PCmods.RData')
 
 # pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
 #   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
@@ -607,10 +619,10 @@ par(mfrow=c(1,1))
 # PCmod1 <-gamm(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat,
 #               correlation=corExp(form=~sN+sE,nugget=TRUE))
 
-summary(PCmod1)
-summary(PCmod2)
-summary(PCmod3) #Not as good
-summary(PCmod4) #Also not so good
+summary(PCmod1) #Not as good
+summary(PCmod2) #Not as good
+summary(PCmod3) 
+summary(PCmod4) #Not as good
 
 #See how predictions look on spatial grid - takes a few minutes
 predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
@@ -701,7 +713,7 @@ p2 <- data.frame(lag=lags,surface=sapply(modList2,function(i) summary(i$surface)
   labs(x='Time lag',y='R-squared')
 ggarrange(p1,p2,ncol=1) 
 
-#Best MSE/R2 for bottom DO 6 days in the past, 20 days in future for surface DO
+#Best MSE/R2 for bottom DO 8 days in the past, 25 days in past for surface DO
 lags[which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))]
 lags[which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))]
 
@@ -772,14 +784,13 @@ p1 <- lapply(1:4,function(i){
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+
   labs(x='Day (lag)',y='Effect')
 
-p2 <- data.frame(pred=predict(bWatMod2),actual=fdat$DO_bottom) %>% 
+p2 <- data.frame(pred=predict(bWatMod2),actual=fdat2$DO_bottom) %>% 
   ggplot()+geom_point(aes(x=pred,y=actual))+
   geom_abline(intercept = 0, slope = 1)+
   labs(x='Predicted Bottom DO',y='Actual Bottom DO')
 
 (p <- ggarrange(p1,p2,ncol=2))
 ggsave('./figures/prelimFigs/PCA_FRmod.png',p,width=10,height=5)
-
 
 
 #Mean absolute error
