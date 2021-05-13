@@ -597,7 +597,7 @@ ggarrange(p1,p2,ncol=1)
 
 # Fit GAMs of PC1:PC4 ----------------------------------------------------------
 
-# load('./data/PCmods.RData')
+load('./data/PCmods.RData')
 
 # pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
 #   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
@@ -792,6 +792,11 @@ p2 <- data.frame(pred=predict(bWatMod2),actual=fdat2$DO_bottom) %>%
 (p <- ggarrange(p1,p2,ncol=2))
 ggsave('./figures/prelimFigs/PCA_FRmod.png',p,width=10,height=5)
 
+#TO DO: 
+# See how shape of PC1:PC4 curves changes with time (look up how this is done in arthropod project)
+
+
+# Compare models ----------------------------------------------------------
 
 #Mean absolute error
 maa <- function(mod) mean(abs(resid(mod))) 
@@ -805,3 +810,4 @@ max(sapply(modList,function(i) summary(i$bottom)$adj.r.squared)) #Lagged linear 
 summary(bWatMod)$r.sq #Functional regression - chlor_a
 max(sapply(modList2,function(i) summary(i$bottom)$adj.r.squared)) #Lagged linear regression - PCA
 summary(bWatMod2)$r.sq #Functional regression - PCA
+
