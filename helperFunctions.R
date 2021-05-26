@@ -94,3 +94,23 @@ smoothPred <- function(dat,m,whichSmooth,ci=1.96){
   dat$upr <- dat$pred + dat$se*ci; dat$lwr <- dat$pred - dat$se*ci 
   return(dat) #Return entire dataframe
 }
+
+#Changes negative values to scaleVal proportion of lowest positive value
+fixNeg <- function(x,scaleVal=0.5) ifelse(x<0,scaleVal*min(x[x>0],na.rm=TRUE),x)
+#Adds minimum value + minimum values * scaleVal 
+fixNeg2 <- function(x,scaleVal=(1+1e-3)) x+abs(min(x,na.rm=TRUE))*scaleVal
+#Linear rescaling between lwr and upr
+rescale <- function(x,lwr=NA,upr=NA){
+  if(is.na(lwr)&is.na(upr)) return(x)
+  if(is.na(lwr)) lwr <- min(x,na.rm=TRUE)
+  if(is.na(upr)) upr <- max(x,na.rm=TRUE)
+  oldlwr <- min(x,na.rm=TRUE)
+  oldupr <- max(x,na.rm=TRUE)
+  oldcenter <- mean(c(oldlwr,oldupr))
+  oldrng <- oldupr-oldlwr
+  x <- (x-oldcenter)/oldrng
+  center <- mean(c(lwr,upr)) #New midpoint
+  rng <- upr-lwr #New range
+  x <- (x*rng)+center #New data
+  return(x)
+}
