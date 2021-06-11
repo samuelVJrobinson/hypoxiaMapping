@@ -587,17 +587,17 @@ ggarrange(p1,p2,ncol=1)
 
 # Fit GAMs of PC1:PC4 ----------------------------------------------------------
 
-# load('./data/PCmods.RData')
+load('./data/PCmods.RData')
 
 pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
 
-PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
-PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
-PCmod5 <-gam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
-save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,file='./data/PCmods.RData')
+# PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+# PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
+# PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
+# PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
+# PCmod5 <-gam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat) 
+# save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,file='./data/PCmods.RData')
 
 par(mfrow=c(2,2)); 
 gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
@@ -665,72 +665,158 @@ ggsave('./figures/analysis1Figs/PCAmod_resid.png',p3,width=8,height=6)
 #Get predictions of PCs at all locations through the entire season
 predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>% 
   left_join(select(locIndex,-doy,-Date),by='YEID') %>% #Join in spatial info
-  mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
-  mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
-  mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(PC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(PC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(PC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(PC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(PC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
 
-lags <- 0:30 #Try 0 to 30 day lags (negative = days after, positive = days before)
-modList2 <- lapply(lags,function(i){
+# lags <- 0:30 #Try 0 to 30 day lags (negative = days after, positive = days before)
+# modList1 <- lapply(lags,function(i){
+#   sWatTemp <- surfWDat #Copies of water data
+#   bWatTemp <- bottomWDat 
+#   chooseThis <- predPC$YEID==sWatTemp$YEID & predPC$doy==(sWatTemp$doy-i) #Location of lagged chlor predictions
+#   #Join PCA values onto copies of water data
+#   sWatTemp <- predPC %>% filter(chooseThis) %>% 
+#     select(contains('predPC')) %>% bind_cols(sWatTemp)
+#   bWatTemp <- predPC %>% filter(chooseThis) %>% 
+#     select(contains('predPC')) %>% bind_cols(bWatTemp)
+#   #Fit simple linear models use PC1:4
+#   sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4+predPCA5,data=sWatTemp)
+#   bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4+predPCA5,data=bWatTemp)
+#     return(list(surface=sMod,bottom=bMod))
+# })
+# 
+# modList2 <- lapply(lags,function(i){
+#   sWatTemp <- surfWDat #Copies of water data
+#   bWatTemp <- bottomWDat 
+#   chooseThis <- predPC$YEID==sWatTemp$YEID & predPC$doy==(sWatTemp$doy-i) #Location of lagged chlor predictions
+#   #Join PCA values onto copies of water data
+#   sWatTemp <- predPC %>% filter(chooseThis) %>% 
+#     select(contains('predPC')) %>% bind_cols(sWatTemp)
+#   bWatTemp <- predPC %>% filter(chooseThis) %>% 
+#     select(contains('predPC')) %>% bind_cols(bWatTemp)
+#   #Fit simple linear models use PC1:4
+#   sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4+predPCA5,data=sWatTemp)
+#   bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4+predPCA5,data=bWatTemp)
+#   return(list(surface=sMod,bottom=bMod))
+# })
+# 
+# # # Slightly better prediction using interactions (R2: 0.47 vs 0.36, MSE: 353 vs 455)
+# # sMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=sWatTemp)
+# # bMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=bWatTemp)
+# 
+# 
+# #Get plots of MSE and R-squared
+# p1 <- data.frame(lag=lags,surface=sapply(modList2,function(i) mean(abs(resid(i$surface)))),
+#                  bottom=sapply(modList2,function(i) mean(abs(resid(i$bottom))))) %>% 
+#   pivot_longer(surface:bottom) %>% 
+#   ggplot()+geom_line(aes(x=lag,y=value))+
+#   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+#   labs(x='Time lag',y='Mean Absolute Error')
+# 
+# p2 <- data.frame(lag=lags,surface=sapply(modList2,function(i) summary(i$surface)$r.squared),
+#                  bottom=sapply(modList2,function(i) summary(i$bottom)$r.squared)) %>% 
+#   pivot_longer(surface:bottom) %>% 
+#   ggplot()+geom_line(aes(x=lag,y=value))+
+#   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+#   labs(x='Time lag',y='R-squared')
+# ggarrange(p1,p2,ncol=1) 
+# 
+# #Best MSE/R2 for bottom DO 8 days in the past, 25 days in past for surface DO
+# lags[which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))]
+# lags[which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))]
+# 
+# #Take a look at both models
+# par(mfrow=c(2,1))
+# dayLag <- which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))
+# bestMod <- modList2[[dayLag]]$bottom #Bottom water model
+# plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Bottom DO (',lags[dayLag],' day lag)'))
+# abline(0,1) #Fairly good relationship (not linear, but OK for now)
+# 
+# dayLag <- which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))
+# bestMod <- modList2[[dayLag]]$surface #Surface water model
+# plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Surface DO (',lags[dayLag],' day lag)'))
+# abline(0,1) #No real relationship
+# par(mfrow=c(1,1))
+# 
+# #Get best models
+# bottomMod <- modList2[[which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))]]$bottom #Bottom water model
+# surfaceMod <- modList2[[which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))]]$surface #surface water model
+# 
+# summary(bottomMod)
+# par(mfrow=c(2,1)); plot(bottomMod,which=c(1,2)); par(mfrow=c(1,1)) #Not too bad here
+# par(mfrow=c(2,1)); plot(surfaceMod,which=c(1,2)); par(mfrow=c(1,1)) #Problems here
+
+lags <- 0:30 #Try 0 to 30 day lags
+fitLagMods <- function(i,interaction=FALSE){
+  # #Copy of spectral data
+  # sDatTemp <- st_drop_geometry(sDat) %>% 
+  #   select(YEID,doy,contains('PC')) %>% 
+  #   mutate(doy=doy+i) #Add to go back, subtract to go forward
+  # 
+  # sWatTemp <- surfWDat %>% #Copies of water data
+  #   left_join(sDatTemp,by=c('YEID','doy'))
+  # bWatTemp <- bottomWDat %>% 
+  #   left_join(sDatTemp,by=c('YEID','doy'))
+  
   sWatTemp <- surfWDat #Copies of water data
-  bWatTemp <- bottomWDat 
+  bWatTemp <- bottomWDat
   chooseThis <- predPC$YEID==sWatTemp$YEID & predPC$doy==(sWatTemp$doy-i) #Location of lagged chlor predictions
   #Join PCA values onto copies of water data
-  sWatTemp <- predPC %>% filter(chooseThis) %>% 
-    select(contains('predPC')) %>% bind_cols(sWatTemp)
-  bWatTemp <- predPC %>% filter(chooseThis) %>% 
-    select(contains('predPC')) %>% bind_cols(bWatTemp)
-  #Fit simple linear models use PC1:4
-  sMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=sWatTemp)
-  bMod <- lm(DO~predPC1+predPC2+predPC3+predPC4,data=bWatTemp)
+  sWatTemp <- predPC %>% filter(chooseThis) %>%
+    select(contains('PC')) %>% bind_cols(sWatTemp)
+  bWatTemp <- predPC %>% filter(chooseThis) %>%
+    select(contains('PC')) %>% bind_cols(bWatTemp)
   
-  # # Slightly better prediction using interactions (R2: 0.47 vs 0.36, MSE: 353 vs 455)
-  # sMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=sWatTemp)
-  # bMod <- lm(DO~predPC1*predPC2*predPC3*predPC4,data=bWatTemp)
+  
+  if(!interaction){
+    #Fit simple linear models use PC1:5
+    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+  } else {
+    #Interaction models
+    sMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=bWatTemp)
+  }
   return(list(surface=sMod,bottom=bMod))
-})
+}
+
+modList1 <- lapply(lags,fitLagMods,interaction=FALSE)
+modList2 <- lapply(lags,fitLagMods,interaction=TRUE)
 
 #Get plots of MSE and R-squared
-p1 <- data.frame(lag=lags,surface=sapply(modList2,function(i) mean(abs(resid(i$surface)))),
-                 bottom=sapply(modList2,function(i) mean(abs(resid(i$bottom))))) %>% 
-  pivot_longer(surface:bottom) %>% 
-  ggplot()+geom_line(aes(x=lag,y=value))+
-  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='Mean Absolute Error')
+p1 <- data.frame(lag=lags,surface1=sapply(modList1,function(i) mae(i$surface)),
+                 bottom1=sapply(modList1,function(i) mae(i$bottom)),
+                 surface2=sapply(modList2,function(i) mae(i$surface)),
+                 bottom2=sapply(modList2,function(i) mae(i$bottom))) %>% 
+  pivot_longer(surface1:bottom2) %>% 
+  mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value,col=modType))+facet_wrap(~name)+
+  labs(x='Time lag',y='Mean Absolute Error',col='Model\nType')
 
-p2 <- data.frame(lag=lags,surface=sapply(modList2,function(i) summary(i$surface)$r.squared),
-                 bottom=sapply(modList2,function(i) summary(i$bottom)$r.squared)) %>% 
-  pivot_longer(surface:bottom) %>% 
-  ggplot()+geom_line(aes(x=lag,y=value))+
-  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='R-squared')
-ggarrange(p1,p2,ncol=1) 
+p2 <- data.frame(lag=lags,surface1=sapply(modList1,function(i) rmse(i$surface)),
+                 bottom1=sapply(modList1,function(i) rmse(i$bottom)),
+                 surface2=sapply(modList2,function(i) rmse(i$surface)),
+                 bottom2=sapply(modList2,function(i) rmse(i$bottom))) %>% 
+  pivot_longer(surface1:bottom2) %>% 
+  mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value,col=modType))+facet_wrap(~name)+
+  labs(x='Time lag',y='Root Mean Squared Error',col='Model\nType')
 
-#Best MSE/R2 for bottom DO 8 days in the past, 25 days in past for surface DO
-lags[which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))]
-lags[which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))]
+p3 <- data.frame(lag=lags,
+                 surface1=sapply(modList1,function(i) summary(i$surface)$r.squared),
+                 bottom1=sapply(modList1,function(i) summary(i$bottom)$r.squared),
+                 surface2=sapply(modList2,function(i) summary(i$surface)$r.squared),
+                 bottom2=sapply(modList2,function(i) summary(i$bottom)$r.squared)) %>% 
+  pivot_longer(surface1:bottom2) %>% 
+  mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value,col=modType))+facet_wrap(~name)+
+  labs(x='Time lag',y='R-squared',col='Model\nType')
 
-#Take a look at both models
-par(mfrow=c(2,1))
-dayLag <- which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))
-bestMod <- modList2[[dayLag]]$bottom #Bottom water model
-plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Bottom DO (',lags[dayLag],' day lag)'))
-abline(0,1) #Fairly good relationship (not linear, but OK for now)
-
-dayLag <- which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))
-bestMod <- modList2[[dayLag]]$surface #Surface water model
-plot(bestMod$model$DO,predict(bestMod),xlab='Actual DO',ylab='Predicted DO',main=paste0('Surface DO (',lags[dayLag],' day lag)'))
-abline(0,1) #No real relationship
-par(mfrow=c(1,1))
-
-#Get best models
-bottomMod <- modList2[[which.min(sapply(modList2,function(i) sum(resid(i$bottom)^2)))]]$bottom #Bottom water model
-surfaceMod <- modList2[[which.min(sapply(modList2,function(i) sum(resid(i$surface)^2)))]]$surface #surface water model
-
-summary(bottomMod)
-par(mfrow=c(2,1)); plot(bottomMod,which=c(1,2)); par(mfrow=c(1,1)) #Not too bad here
-par(mfrow=c(2,1)); plot(surfaceMod,which=c(1,2)); par(mfrow=c(1,1)) #Problems here
+p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+ggsave('./figures/analysis2Figs/lagPCAmod1.png',p,width=8,height=8)
 
 # Functional regression using PCAs ----------------------------------------
 
@@ -741,12 +827,12 @@ dayLags <- -NdayForward:NdayLag
 #Matrices to store PCA predictions for past 0:30 days
 predMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
                        dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
-pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat)
+pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat)
 
-for(p in 1:4){ #PCA dimensions
+for(p in 1:5){ #PCA dimensions
   for(i in 1:nrow(bottomWDat)){ #For each bottom water measurement
     getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags #Which days are 0-30 days behind the measurement?
-    pcaMatList[[p]][i,] <- predPC[predPC$YEID == bottomWDat$YEID[i] & predPC$doy %in% getDays,paste0('predPC',p)]
+    pcaMatList[[p]][i,] <- predPC[predPC$YEID == bottomWDat$YEID[i] & predPC$doy %in% getDays,paste0('PC',p)]
   }
 }
 
@@ -755,24 +841,25 @@ fdat2 <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
              dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
              pcaMat1=pcaMatList$PCA1,pcaMat2=pcaMatList$PCA2,
              pcaMat3=pcaMatList$PCA3,pcaMat4=pcaMatList$PCA4,
+             pcaMat5=pcaMatList$PCA5,
              doy=bottomWDat$doy,sE=bottomWDat$sE,sN=bottomWDat$sN,
              maxDepth=bottomWDat$maxDepth)
 
-basisType <- 'ts' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
+basisType <- 'cr' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
 #Fit FDA models 
 bWatMod2 <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
-                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType), 
+                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType), 
                data=fdat2) #Bottom water
-summary(bWatMod2) #R-squared of about 0.46
+summary(bWatMod2) #R-squared of about 0.56
 par(mfrow=c(2,2)); gam.check(bWatMod2); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod2,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
-p1 <- lapply(1:4,function(i){
+p1 <- lapply(1:5,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
   smoothPred(m=bWatMod2,dat=d,whichSmooth=i) 
-}) %>% set_names(paste0('PCA',1:4)) %>% bind_rows(.id='PC') %>% 
+}) %>% set_names(paste0('PCA',1:5)) %>% bind_rows(.id='PC') %>% 
   select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+
@@ -786,20 +873,23 @@ p2 <- data.frame(pred=predict(bWatMod2),actual=fdat2$DO_bottom) %>%
 (p <- ggarrange(p1,p2,ncol=2))
 ggsave('./figures/analysis1Figs/PCA_FRmod.png',p,width=10,height=5)
 
-#TO DO: 
-# See how shape of PC1:PC4 curves changes with time (look up how this is done in arthropod project)
-
-
 # Compare models ----------------------------------------------------------
 
-min(sapply(modList,function(i) maa(i$bottom))) #Lagged linear regression - chlor_a
-maa(bWatMod) #Functional regression - chlor_a
-min(sapply(modList2,function(i) maa(i$bottom))) #Lagged linear regression - PCA
-maa(bWatMod2) #Functional regression - PCA
+#RMSE
+min(sapply(modList1,function(i) rmse(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) rmse(i$bottom))) #Lagged linear regression - PCA with interactions
+rmse(bWatMod2) #Functional regression - PCA
+
+#Which days do these occur on?
+which.min(sapply(modList1,function(i) rmse(i$bottom))) #8-day lag
+which.min(sapply(modList2,function(i) rmse(i$bottom))) #30-day lag
+
+#MAE
+min(sapply(modList1,function(i) mae(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) mae(i$bottom))) #Lagged linear regression - PCA with interactions
+mae(bWatMod2) #Functional regression - PCA
 
 #R2
-max(sapply(modList,function(i) summary(i$bottom)$adj.r.squared)) #Lagged linear regression - chlor_a
-summary(bWatMod)$r.sq #Functional regression - chlor_a
 max(sapply(modList2,function(i) summary(i$bottom)$adj.r.squared)) #Lagged linear regression - PCA
 summary(bWatMod2)$r.sq #Functional regression - PCA
 
