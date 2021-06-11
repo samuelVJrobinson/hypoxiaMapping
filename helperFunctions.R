@@ -114,3 +114,9 @@ rescale <- function(x,lwr=NA,upr=NA){
   x <- (x*rng)+center #New data
   return(x)
 }
+
+#Mean absolute error
+mae <- function(mod) mean(abs(resid(mod))) 
+
+#Root mean square error
+rmse <- function(mod) sqrt(mean(resid(mod)^2))
