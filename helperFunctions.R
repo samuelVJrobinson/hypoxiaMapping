@@ -116,7 +116,21 @@ rescale <- function(x,lwr=NA,upr=NA){
 }
 
 #Mean absolute error
-mae <- function(mod) mean(abs(resid(mod))) 
+mae <- function(mod){
+  if(!any(c('lm','gam') %in% class(mod))) return(NA)
+  return(mean(abs(resid(mod))))
+}
 
 #Root mean square error
-rmse <- function(mod) sqrt(mean(resid(mod)^2))
+rmse <- function(mod){
+  if(!any(c('lm','gam') %in% class(mod))) return(NA)
+  return(sqrt(mean(resid(mod)^2)))
+} 
+
+#R2 from lm objects
+getR2 <- function(mod) if(class(mod)!='lm') return(NA) else summary(mod)$r.squared
+
+#DF
+getDF <- function(mod) if(class(mod)!='lm') return(NA) else mod$df.residual 
+  
+  

@@ -22,67 +22,80 @@ load('./data/all2014.Rdata')
 
 # Lagged linear model: PCA ----------------------------------------------------
 
-lags <- 0:30 #Try 0 to 30 day lags
-modList <- lapply(lags,function(i){ #Lagged linear models of DO using PC1:4
+lags <- 0:30 #0 to 30 day lags
+fitLagMods <- function(i,interaction=FALSE){
   #Copy of spectral data
   sDatTemp <- st_drop_geometry(sDat) %>% 
     select(YEID,doy,contains('PC')) %>% 
-    mutate(doy=doy+i) #Add to go back, subtract to go forward
+    mutate(doy=doy+i) %>% #Add to go back, subtract to go forward
+    unite(ID,c('YEID','doy'),sep='-')
   
-  sWatTemp <- surfWDat %>% #Copies of water data
-    left_join(sDatTemp,by=c('YEID','doy'))
-  bWatTemp <- bottomWDat %>% 
-    left_join(sDatTemp,by=c('YEID','doy'))
+  sWatTemp <- surfWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% #Copies of water data
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
+  bWatTemp <- bottomWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% 
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
   
-  #Fit simple linear models use PC1:4
-  sMod <- lm(DO~PC1+PC2+PC3+PC4,data=sWatTemp)
-  bMod <- lm(DO~PC1+PC2+PC3+PC4,data=bWatTemp)
-  return(list(surface=sMod,bottom=bMod))
-})
 
-modList2 <- lapply(lags,function(i){ #Lagged linear models of DO using PC1:4 (interactions)
-  #Copy of spectral data
-  sDatTemp <- st_drop_geometry(sDat) %>% 
-    select(YEID,doy,contains('PC')) %>% 
-    mutate(doy=doy+i) #Add to go back, subtract to go forward
-  
-  sWatTemp <- surfWDat %>% #Copies of water data
-    left_join(sDatTemp,by=c('YEID','doy'))
-  bWatTemp <- bottomWDat %>% 
-    left_join(sDatTemp,by=c('YEID','doy'))
-  
-  #Interactions of PCs
-  sMod <- lm(DO~PC1*PC2*PC3*PC4,data=sWatTemp)
-  bMod <- lm(DO~PC1*PC2*PC3*PC4,data=bWatTemp)
+  if(!interaction){
+    #Fit simple linear models use PC1:5
+    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+    
+  } else {
+    #Interaction models
+    sMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=bWatTemp)
+  }
+  if(any(is.na(coef(sMod)))|length(coef(sMod))>=nrow(sWatTemp)-5){
+    warning('NA coefs or more coefs than data. Model fit singular.')
+    return(list(surface=NA,bottom=NA))
+  }
   return(list(surface=sMod,bottom=bMod))
-})
+}
+
+# fitLagMods(7,TRUE)$surface
+# debugonce(fitLagMods)
+
+modList1 <- lapply(lags,fitLagMods,interaction=FALSE)
+modList2 <- lapply(lags,fitLagMods,interaction=TRUE)
 
 #Get plots of MSE and R-squared
 p1 <- data.frame(lag=lags,
-                 surface1=sapply(modList,function(i) mean(abs(resid(i$surface)))),
-                 bottom1=sapply(modList,function(i) mean(abs(resid(i$bottom)))),
-                 surface2=sapply(modList2,function(i) mean(abs(resid(i$surface)))),
-                 bottom2=sapply(modList2,function(i) mean(abs(resid(i$bottom))))) %>% 
+                 surface1=sapply(modList1,function(i) mae(i$surface)),
+                 bottom1=sapply(modList1,function(i) mae(i$bottom)),
+                 surface2=sapply(modList2,function(i) mae(i$surface)),
+                 bottom2=sapply(modList2,function(i) mae(i$bottom))) %>% 
   pivot_longer(surface1:bottom2) %>% 
   mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='Mean Absolute Error',col='Model\nType')
+  labs(x='Time lag',y='Mean Absolute Error',col='Model Type')
 
+#Get plots of MSE and R-squared
 p2 <- data.frame(lag=lags,
-             surface1=sapply(modList,function(i) summary(i$surface)$r.squared),
-             bottom1=sapply(modList,function(i) summary(i$bottom)$r.squared),
-             surface2=sapply(modList2,function(i) summary(i$surface)$r.squared),
-             bottom2=sapply(modList2,function(i) summary(i$bottom)$r.squared)) %>% 
+                 surface1=sapply(modList1,function(i) rmse(i$surface)),
+                 bottom1=sapply(modList1,function(i) rmse(i$bottom)),
+                 surface2=sapply(modList2,function(i) rmse(i$surface)),
+                 bottom2=sapply(modList2,function(i) rmse(i$bottom))) %>% 
   pivot_longer(surface1:bottom2) %>% 
   mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='R-squared',col='Model\nType')
-p <- ggarrange(p1,p2,ncol=1,common.legend=TRUE,legend='right') 
-ggsave('./figures/analysis2Figs/lagPCAmod1.png',p,width=8,height=8)
+  labs(x='Time lag',y='Root mean squared error',col='Model Type')
 
-#Still a dip in MAE at around 5-6 days, but this isn't as clear-cut
+
+p3 <- data.frame(lag=lags,
+             surface1=sapply(modList1,function(i) getR2(i$surface)),
+             bottom1=sapply(modList1,function(i) getR2(i$surface)),
+             surface2=sapply(modList2,function(i) getR2(i$surface)),
+             bottom2=sapply(modList2,function(i) getR2(i$surface))) %>% 
+  pivot_longer(surface1:bottom2) %>% 
+  mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
+  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+  labs(x='Time lag',y='R-squared',col='Model Type')
+p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+ggsave('./figures/lagPCAmod_raw.png',p,width=8,height=8)
 
 # Functional regression using PCs -------------------------------------------------------------
 
@@ -118,10 +131,33 @@ plot(0:30,c(sum(!is.na(fdat$pcaMat1[,1])),
 
 
 
-basisType <- 'ts' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
+basisType <- 'cr' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
 #Fit FDA models 
 bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
                   s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType), 
                 data=fdat) #Bottom water
 
 #Summary: FR isn't possible without some kind of missing data imputation, as there is too much missing data
+
+# Compare models ---------------------------
+
+#RMSE
+min(sapply(modList1,function(i) rmse(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) rmse(i$bottom)),na.rm=TRUE) #Lagged linear regression - PCA with interactions
+
+#Which days do these occur on?
+lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #11-day gap
+lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #13-day gap
+
+#MAE
+min(sapply(modList1,function(i) mae(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) mae(i$bottom)),na.rm=TRUE) #Lagged linear regression - PCA with interactions
+
+#R2
+max(sapply(modList1,function(i) getR2(i$bottom))) #Lagged linear regression - PCA
+max(sapply(modList2,function(i) getR2(i$bottom)),na.rm=TRUE) #Lagged linear regression - PCA
+
+#df
+sapply(modList1,function(i) getDF(i$bottom))[which.min(sapply(modList1,function(i) rmse(i$bottom)))]
+sapply(modList2,function(i) getDF(i$bottom))[which.min(sapply(modList2,function(i) rmse(i$bottom)))]
+

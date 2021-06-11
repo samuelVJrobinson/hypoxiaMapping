@@ -1,0 +1,10 @@
+Model,Data type,RMSE,MAE,R2,Residual DF,Notes
+Lagged Linear PCA no Interaction,Smoothed,1.424635,1.118092,0.4117999,199,7-day lag
+Lagged Linear PCA with Interaction,Smoothed,1.116048,0.8771623,0.5847683,173,0-day lag
+Functional Linear PCA,Smoothed,1.234206,0.9160619,0.5371752,189.81,
+Lagged Linear PCA no Interaction,Raw,0.6489842,0.5622283,0.7747977,23,11-day lag
+Lagged Linear PCA with Interaction,Raw,0.2549736,0.1864932,0.9855013,6,13-day lag
+Functional Linear PCA,Raw,NA,NA,NA,NA,Not possible: too few days without data gaps
+Lagged Linear PCA no Interaction,Gap-filled,1.491959,1.203161,0.3707045,199,30-day lag
+Lagged Linear PCA with Interaction,Gap-filled,1.288742,0.9989468,0.5304596,173,29-day lag
+Functional Linear PCA,Gap-filled,1.296109,1.01964,0.4808095,186.61,

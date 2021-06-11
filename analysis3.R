@@ -21,62 +21,10 @@ load('./data/all2014.Rdata')
 
 #GAM imputation ------------------------------------------
 
-pcDat <- sDat %>% select(YEID,date_img,gap,E:geometry) %>% filter(!gap) %>% #Strips out missing data
-  mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
+#Load smoothers
+load('./data/PCmods.RData')
 
-PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(40,10),d=c(2,1)),data=pcDat) 
-PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(40,10),d=c(2,1)),data=pcDat) #Not that great
-PCmod5 <-gam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(40,10),d=c(2,1)),data=pcDat) #Not that great
-
-# par(mfrow=c(2,2)); 
-# gam.check(PCmod1); abline(0,1,col='red'); 
-# gam.check(PCmod2); abline(0,1,col='red'); 
-# gam.check(PCmod3); abline(0,1,col='red'); 
-# gam.check(PCmod4); abline(0,1,col='red'); #Not as good, but minimal variance, so this probably doesn't matter as much
-# gam.check(PCmod5); abline(0,1,col='red'); 
-# par(mfrow=c(1,1))
-
-#See how predictions look on spatial grid - takes a few minutes
-predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>%
-  separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>%
-  mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
-
-#Predicted values
-p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>%
-  pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>%
-  ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
-  facet_grid(name~date)+
-  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
-  labs(x='E',y='N',col='PC Value',title='Predicted value')+
-  theme(legend.position='bottom')
-# 
-# #SE of prediction
-# p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>% 
-#   pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
-#   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
-#   facet_grid(name~date)+
-#   scale_colour_distiller(type='div',palette = "Reds",direction=1)+
-#   labs(x='E',y='N',col='SE of PC Value',title='Standard error of Prediction')+
-#   theme(legend.position='bottom')
-# 
-# #Residual plots
-# p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),residPC4=resid(PCmod4)) %>% 
-#   pivot_longer(contains('residPC')) %>% mutate(name=gsub('residPC','PC',name)) %>% 
-#   mutate(date=dateCut(date_img,9)) %>% 
-#   ggplot()+geom_point(aes(x=sE,y=sN,col=value,alpha=abs(value),size=abs(value)))+
-#   facet_grid(name~date)+
-#   scale_colour_distiller(type='div',palette = "Spectral",direction=1)+
-#   scale_alpha_continuous(range=c(0.01,0.75))+
-#   labs(x='E',y='N',col='Residual',title='Residual plot')+
-#   theme(legend.position='bottom')
-
-#Get predictions of PCs at all locations through the entire season
+#Get predictions of PCs at all locations through the entire season. If PC values missing, fill using PC model
 sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.)) %>% 
   mutate(predPC3=predict(PCmod3,newdata=.),predPC4=predict(PCmod4,newdata=.),predPC5=predict(PCmod5,newdata=.)) %>% 
   mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3),PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC4,PC5)) %>% 
@@ -86,63 +34,76 @@ sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2
 #Fit model of DO to gap-filled PCs ----------------------------------
 
 lags <- 0:30 #Try 0 to 30 day lags
-modList <- lapply(lags,function(i){ #Lagged linear models of DO using PC1:4
+fitLagMods <- function(i,interaction=FALSE){
   #Copy of spectral data
   sDatTemp <- st_drop_geometry(sDat) %>% 
     select(YEID,doy,contains('PC')) %>% 
-    mutate(doy=doy+i) #Add to go back, subtract to go forward
+    mutate(doy=doy+i) %>% #Add to go back, subtract to go forward
+    unite(ID,c('YEID','doy'),sep='-')
   
-  sWatTemp <- surfWDat %>% #Copies of water data
-    left_join(sDatTemp,by=c('YEID','doy'))
-  bWatTemp <- bottomWDat %>% 
-    left_join(sDatTemp,by=c('YEID','doy'))
+  sWatTemp <- surfWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% #Copies of water data
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
+  bWatTemp <- bottomWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% 
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
   
-  #Fit simple linear models use PC1:4
-  sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
-  bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+  
+  if(!interaction){
+    #Fit simple linear models use PC1:5
+    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+    
+  } else {
+    #Interaction models
+    sMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=bWatTemp)
+  }
+  if(any(is.na(coef(sMod)))|length(coef(sMod))>=nrow(sWatTemp)-5){
+    warning('NA coefs or more coefs than data. Model fit singular.')
+    return(list(surface=NA,bottom=NA))
+  }
   return(list(surface=sMod,bottom=bMod))
-})
+}
 
-modList2 <- lapply(lags,function(i){ #Lagged linear models of DO using PC1:4 (interactions)
-  #Copy of spectral data
-  sDatTemp <- st_drop_geometry(sDat) %>% 
-    select(YEID,doy,contains('PC')) %>% 
-    mutate(doy=doy+i) #Add to go back, subtract to go forward
-  
-  sWatTemp <- surfWDat %>% #Copies of water data
-    left_join(sDatTemp,by=c('YEID','doy'))
-  bWatTemp <- bottomWDat %>% 
-    left_join(sDatTemp,by=c('YEID','doy'))
-  
-  #Interactions of PCs
-  sMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=sWatTemp)
-  bMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=bWatTemp)
-  return(list(surface=sMod,bottom=bMod))
-})
+modList1 <- lapply(lags,fitLagMods,interaction=FALSE)
+modList2 <- lapply(lags,fitLagMods,interaction=TRUE)
 
 #Get plots of MSE and R-squared
 p1 <- data.frame(lag=lags,
-                 surface1=sapply(modList,function(i) mean(abs(resid(i$surface)))),
-                 bottom1=sapply(modList,function(i) mean(abs(resid(i$bottom)))),
-                 surface2=sapply(modList2,function(i) mean(abs(resid(i$surface)))),
-                 bottom2=sapply(modList2,function(i) mean(abs(resid(i$bottom))))) %>% 
+                 surface1=sapply(modList1,function(i) mae(i$surface)),
+                 bottom1=sapply(modList1,function(i) mae(i$bottom)),
+                 surface2=sapply(modList2,function(i) mae(i$surface)),
+                 bottom2=sapply(modList2,function(i) mae(i$bottom))) %>% 
   pivot_longer(surface1:bottom2) %>% 
   mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='Mean Absolute Error',col='Model\nType')
+  labs(x='Time lag',y='Mean Absolute Error',col='Model Type')
 
+#Get plots of MSE and R-squared
 p2 <- data.frame(lag=lags,
-                 surface1=sapply(modList,function(i) summary(i$surface)$r.squared),
-                 bottom1=sapply(modList,function(i) summary(i$bottom)$r.squared),
-                 surface2=sapply(modList2,function(i) summary(i$surface)$r.squared),
-                 bottom2=sapply(modList2,function(i) summary(i$bottom)$r.squared)) %>% 
+                 surface1=sapply(modList1,function(i) rmse(i$surface)),
+                 bottom1=sapply(modList1,function(i) rmse(i$bottom)),
+                 surface2=sapply(modList2,function(i) rmse(i$surface)),
+                 bottom2=sapply(modList2,function(i) rmse(i$bottom))) %>% 
   pivot_longer(surface1:bottom2) %>% 
   mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
-  labs(x='Time lag',y='R-squared',col='Model\nType')
-ggarrange(p1,p2,ncol=1,common.legend=TRUE,legend='right') 
+  labs(x='Time lag',y='Root mean squared error',col='Model Type')
+
+p3 <- data.frame(lag=lags,
+                 surface1=sapply(modList1,function(i) getR2(i$surface)),
+                 bottom1=sapply(modList1,function(i) getR2(i$surface)),
+                 surface2=sapply(modList2,function(i) getR2(i$surface)),
+                 bottom2=sapply(modList2,function(i) getR2(i$surface))) %>% 
+  pivot_longer(surface1:bottom2) %>% 
+  mutate(modType=ifelse(grepl('1',name),'Simple','Interaction'),name=gsub('(1|2)','',name)) %>% 
+  ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
+  geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
+  labs(x='Time lag',y='R-squared',col='Model Type')
+
+p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
 #Similar to models using raw data: no local minimum appears
 
@@ -173,7 +134,7 @@ fdat <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
              sE=bottomWDat$sE,sN=bottomWDat$sN,
              maxDepth=bottomWDat$maxDepth)
 
-basisType <- 'ts' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
+basisType <- 'cr' #Cubic regression splines
 #Fit FDA models 
 bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
                  s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType), 
@@ -199,6 +160,33 @@ p2 <- data.frame(pred=predict(bWatMod),actual=fdat$DO_bottom) %>%
   geom_abline(intercept = 0, slope = 1)+
   labs(x='Predicted Bottom DO',y='Actual Bottom DO')
 
-ggarrange(p1,p2,ncol=2)
+(p <- ggarrange(p1,p2,ncol=2))
+ggsave('./figures/frPCA_gapfill.png',p,width=10,height=5)
+ggsave('./figures/frPCA_gapfill2.png',p1,width=10,height=5)
 
+#Compare models --------------------------
+
+#RMSE
+min(sapply(modList1,function(i) rmse(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) rmse(i$bottom))) #Lagged linear regression - PCA with interactions
+rmse(bWatMod) #Functional regression - PCA
+
+#Which days do these occur on?
+lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #7-day lag
+lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #0-day lag
+
+#MAE
+min(sapply(modList1,function(i) mae(i$bottom))) #Lagged linear regression - PCA
+min(sapply(modList2,function(i) mae(i$bottom))) #Lagged linear regression - PCA with interactions
+mae(bWatMod) #Functional regression - PCA
+
+#R2
+max(sapply(modList1,function(i) getR2(i$bottom))) #Lagged linear regression - PCA
+max(sapply(modList2,function(i) getR2(i$bottom)),na.rm=TRUE) #Lagged linear regression - PCA
+summary(bWatMod)$r.sq #Functional regression - PCA
+
+#df
+sapply(modList1,function(i) getDF(i$bottom))[which.min(sapply(modList1,function(i) rmse(i$bottom)))]
+sapply(modList2,function(i) getDF(i$bottom))[which.min(sapply(modList2,function(i) rmse(i$bottom)))]
+bWatMod$df.residual
 
