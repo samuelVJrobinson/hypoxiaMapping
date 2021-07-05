@@ -55,17 +55,17 @@ source('helperFunctions.R')
 # 
 # #choose only surface water, using order of depth measurements
 # surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>%
-#   filter(depthOrd==1) %>% select(-depthOrd)
+#   filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
 # 
 # #choose only bottom water
 # bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>%
-#   filter(depthOrd==1) %>% select(-depthOrd)
+#   filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
 # 
 # #PCA imputation of missing data imputation for missing data
 # # Examples: https://link.springer.com/article/10.1007/s11258-014-0406-z
 # # http://juliejosse.com/wp-content/uploads/2018/05/DataAnalysisMissingR.html
 # 
-# #Most measurements are missing 13 or 14 measurements 
+# #Most measurements are missing 13 or 14 measurements
 # table(sDat$numNA)
 # 
 # #"Most missing" values is chlor_a. Rrs_ values are all missing together
@@ -75,12 +75,12 @@ source('helperFunctions.R')
 # hist(sDat$propNA,xlab='Proportion NA values')
 # 
 # #Get all values into a dataframe
-# sDatMat <- sDat %>% st_drop_geometry() %>% 
-#   select(YEID:sst,propNA) %>% 
-#   unite(ID,YEID,date_img) %>% remove_rownames() %>% 
+# sDatMat <- sDat %>% st_drop_geometry() %>%
+#   select(YEID:sst,propNA) %>%
+#   unite(ID,YEID,date_img) %>% remove_rownames() %>%
 #   column_to_rownames(var='ID') %>%
 #   filter(propNA<0.3) %>% #Drop rows that have more than 30% of their values missing
-#   select(-propNA) %>% 
+#   select(-propNA) %>%
 #   mutate(across(everything(),log)) #Log-scale variables
 # 
 # # #For complete data (no NAs)
@@ -97,20 +97,21 @@ source('helperFunctions.R')
 # 
 # # n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes a minute or so
 # # plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
-# sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions 
+# sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions
 # 
 # head(sDatMat_imputed$completeObs) #Filled-in data
 # head(sDatMat) #Original data
 # 
 # pca1 <- prcomp(sDatMat_imputed$completeObs,scale=TRUE) #Get PCA values
-
+# 
 # # Looks like about 4 dims are needed for 95% of variance, 5 for 97.5%
 # (p <- data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
 #   ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
 #   labs(x='Principle Component',y='Cumulative Variance')+
 #   geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
+# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #97% of var in first 5 PCs
 # ggsave('./figures/pcVar.png',p,width=5,height=5)
-
+# 
 # #Factor loadings of first 5 PCs
 # p <- pca1$rotation[,1:5] %>% data.frame() %>% rownames_to_column(var='var') %>%
 #   pivot_longer(PC1:PC5) %>%
@@ -122,16 +123,23 @@ source('helperFunctions.R')
 #   facet_wrap(~name)+
 #   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-5')
 # ggsave('./figures/factorLoadings.png',p,width=10,height=5)
- 
+# 
 # #Join imputed PCA values back to original dataset (NA if no data on that day)
 # sDat_pca <- pca1$x[,1:5] %>% as.data.frame() %>% rownames_to_column('ID')
-# sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>% 
+# sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
 #   left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
 # rm(sDat_pca,sDatMat_imputed,sDatMat) #cleanup
 # save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,file='./data/all2014.Rdata')
 
 #Load data from saved file
 load('./data/all2014.Rdata')
+
+# Summary statistics of dataset -----------------------------
+
+nrow(bottomWDat) #204 bottom DO measurements
+length(unique(bottomWDat$doy)) #25 unique days
+range(bottomWDat$Date) #Taken from May 26 - August 2
+length(unique(with(bottomWDat,paste0(E,'_',N)))) #203 unique locations
 
 # Take a look at water data ---------------------
 

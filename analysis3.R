@@ -34,9 +34,9 @@ sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2
 #Fit model of DO to gap-filled PCs ----------------------------------
 
 lags <- 0:30 #Try 0 to 30 day lags
-fitLagMods <- function(i,interaction=FALSE){
+fitLagMods <- function(i,dat=sDat,interaction=FALSE){
   #Copy of spectral data
-  sDatTemp <- st_drop_geometry(sDat) %>% 
+  sDatTemp <- st_drop_geometry(dat) %>% 
     select(YEID,doy,contains('PC')) %>% 
     mutate(doy=doy+i) %>% #Add to go back, subtract to go forward
     unite(ID,c('YEID','doy'),sep='-')
@@ -79,7 +79,7 @@ p1 <- data.frame(lag=lags,
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
   labs(x='Time lag',y='Mean Absolute Error',col='Model Type')
 
-#Get plots of MSE and R-squared
+#Get plots of MSE and RMSE
 p2 <- data.frame(lag=lags,
                  surface1=sapply(modList1,function(i) rmse(i$surface)),
                  bottom1=sapply(modList1,function(i) rmse(i$bottom)),
@@ -91,6 +91,7 @@ p2 <- data.frame(lag=lags,
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
   labs(x='Time lag',y='Root mean squared error',col='Model Type')
 
+#Get plots of MSE and R2
 p3 <- data.frame(lag=lags,
                  surface1=sapply(modList1,function(i) getR2(i$surface)),
                  bottom1=sapply(modList1,function(i) getR2(i$surface)),
@@ -102,10 +103,117 @@ p3 <- data.frame(lag=lags,
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
   labs(x='Time lag',y='R-squared',col='Model Type')
 
-p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+(p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') )
 ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
 #Similar to models using raw data: no local minimum appears
+
+# Cross-validation (use 70%, predict on 30%)
+
+#Function to fit models on random 70% of data, return prediction differences for remaining 30%
+fitLagModsCV <- function(i,dat=sDat,interaction=FALSE,use=0.7){
+
+  require(tidyverse)
+  require(sf)
+  
+  #Copy of spectral data
+  sDatTemp <- st_drop_geometry(dat) %>% 
+    select(YEID,doy,contains('PC')) %>% 
+    mutate(doy=doy+i) %>% #Add to go back, subtract to go forward
+    unite(ID,c('YEID','doy'),sep='-')
+  
+  sWatTemp <- surfWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% #Copies of water data
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1)) %>% mutate(predSet=makeTF(.,1-use))
+    
+  bWatTemp <- bottomWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% 
+    left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1)) %>% mutate(predSet=makeTF(.,1-use))
+  
+  sWatPredSet <- sWatTemp %>% filter(predSet) #Take only samples from prediction set
+  bWatPredSet <- bWatTemp %>% filter(predSet) 
+  
+  sWatTemp <- sWatTemp %>% filter(!predSet) #Remove prediction set
+  bWatTemp <- bWatTemp %>% filter(!predSet)
+  
+  if(!interaction){
+    #Fit simple linear models use PC1:5
+    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+    
+  } else {
+    #Interaction models
+    sMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=sWatTemp)
+    bMod <- lm(DO~PC1*PC2*PC3*PC4*PC5,data=bWatTemp)
+  }
+  if(any(is.na(coef(sMod)))|length(coef(sMod))>=nrow(sWatTemp)-5){
+    warning('NA coefs or more coefs than data. Model fit singular.')
+    return(list(surface=NA,bottom=NA))
+  }
+  
+  #Predict on withheld dataset, get difference
+  sModPreds <- sWatPredSet %>% mutate(pred=predict(sMod,newdata=sWatPredSet),diff=pred-DO)
+  bModPreds <- bWatPredSet %>% mutate(pred=predict(bMod,newdata=bWatPredSet),diff=pred-DO)
+  
+  return(list(surfaceDiff=sModPreds$diff,bottomDiff=bModPreds$diff))
+}
+
+#Function to run this in parallel, return as a dataframe
+cvPredErrs <- function(i,inter=FALSE){
+  source('helperFunctions.R')
+  lapply(replicate(n=1000,expr=fitLagModsCV(i,interaction = inter),simplify = FALSE),function(x){
+    ret <- data.frame(rmseSurface=rmse(x$surfaceDiff),rmseBottom=rmse(x$bottomDiff),
+                      maeSurface=mae(x$surfaceDiff),maeBottom=mae(x$bottomDiff))
+    return(ret)
+  })
+}
+
+#Get prediction errors for surface/bottom, using RMSE and MAE
+
+# library(parallel)
+# cluster <- makeCluster(15)
+# clusterExport(cluster,c('fitLagModsCV','sDat','surfWDat','bottomWDat'))
+# cvPredList <- parLapply(cl=cluster,lags,cvPredErrs) #No interactions
+# cvPredList2 <- parLapply(cl=cluster,lags,cvPredErrs,inter=TRUE) #Interactions
+# stopCluster(cluster)
+# cvPredList <- lapply(cvPredList,function(x) do.call('rbind',x))
+# cvPredList2 <- lapply(cvPredList2,function(x) do.call('rbind',x))
+# 
+# cvPredList <- cvPredList %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>% 
+#   mutate(depth=ifelse(grepl('Surface',name),'surface','bottom')) %>% 
+#   mutate(errType=ifelse(grepl('rmse',name),'rmse','mae')) %>% select(-name) %>% mutate(modType='Simple')
+# 
+# cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>% 
+#   mutate(depth=ifelse(grepl('Surface',name),'surface','bottom')) %>% 
+#   mutate(errType=ifelse(grepl('rmse',name),'rmse','mae')) %>% select(-name) %>% mutate(modType='Interaction')
+# 
+# save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
+
+load('./data/cvPredLists.Rdata')
+
+bind_rows(cvPredList,cvPredList2) %>% filter(depth=='bottom') %>% 
+  mutate(errType=factor(errType,labels=c('MAE','RMSE'))) %>% 
+  ggplot(aes(x=lag,y=value,col=modType))+
+  geom_point(alpha=0.1,position=position_dodge(width=0.5))+
+  facet_wrap(~errType)+
+  labs(x='Time lag',y='Out-of-Sample Error',title='Bottom DO - Lagged linear Model',col='Model Type')+
+  coord_cartesian(ylim=c(NA,5))
+
+cvPredList %>% filter(depth=='bottom') %>% group_by(lag,errType) %>% 
+  summarize(mean=mean(value),med=median(value),max=max(value),min=min(value)) %>% 
+  mutate(errType=factor(errType,labels=c('MAE','RMSE'))) %>% 
+  ggplot(aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+  geom_line()+facet_wrap(~errType)+
+  labs(x='Time lag',y='Out-of-Sample Error',title='Bottom DO - Lagged linear Model')
+
+bind_rows(cvPredList,cvPredList2) %>% filter(depth=='bottom') %>% 
+  mutate(errType=factor(errType,labels=c('MAE','RMSE'))) %>% 
+  group_by(lag,errType,modType) %>% 
+  summarize(mean=mean(value),med=median(value),max=max(value),min=min(value)) %>% 
+  ggplot(aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min,fill=modType),alpha=0.3)+
+  geom_line(aes(col=modType))+facet_wrap(~errType)+
+  labs(x='Time lag',y='Out-of-Sample Error',title='Bottom DO - Lagged linear Model',col='Model Type',fill='Model Type')+
+  coord_cartesian(ylim=c(NA,10))
+  
+  
 
 # Fit FR model of DO to gap-filled PCs ------------------------------------
 
@@ -126,7 +234,8 @@ for(p in 1:5){ #PCA dimensions
 }
 
 #Data for functional regression
-fdat <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
+fdat <- list(DO_bottom=bottomWDat$DO,
+             # DO_surf=surfWDat$DO,
              dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
              pcaMat1=pcaMatList$PCA1,pcaMat2=pcaMatList$PCA2,
              pcaMat3=pcaMatList$PCA3,pcaMat4=pcaMatList$PCA4,
@@ -164,6 +273,48 @@ p2 <- data.frame(pred=predict(bWatMod),actual=fdat$DO_bottom) %>%
 ggsave('./figures/frPCA_gapfill.png',p,width=10,height=5)
 ggsave('./figures/frPCA_gapfill2.png',p1,width=10,height=5)
 
+# Cross-validation (use 70%, predict on 30%)
+
+#Function to fit models on random 70% of data, return prediction differences for remaining 30%
+#uses fDat from above, and samples within it
+fitFRmodCV <- function(i,dat=fdat,use=0.7){ #i doesn't do anything, just for parallel processing
+
+  require(mgcv)
+  source('helperFunctions.R')
+  
+  #Copy of spectral data
+  predSet <- makeTF(data.frame(dat$DO_bottom),(1-use))
+  
+  getRows <- function(x,choose) if(any(class(x)=='matrix')) return(x[choose,]) else return(x[choose])
+  
+  predDat <- lapply(fdat,getRows,choose=predSet) #Data to predict on
+  dat <- lapply(fdat,getRows,choose=!predSet) #Data to fit with
+  
+  basisType <- 'cr' #Cubic regression splines
+  #Fit FDA models 
+  bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
+                   s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType), 
+                 data=dat) #Bottom water
+  
+  #Predict on withheld dataset, get difference
+  bModPreds <- predict(bWatMod,newdata = predDat)-predDat$DO_bottom
+  
+  ret <- c(rmse(bModPreds),mae(bModPreds))
+  names(ret) <- c('RMSE','MAE')
+  return(ret)
+}
+
+library(parallel)
+cluster <- makeCluster(15)
+clusterExport(cluster,c('fitFRmodCV','fdat'))
+cvPredList3 <- parLapply(cl=cluster,1:1000,fitFRmodCV)  #Takes only a few seconds to run
+stopCluster(cluster)
+
+pivot_longer(bind_rows(cvPredList3),RMSE:MAE) %>% group_by(name) %>% 
+  # summarize(mean=mean(value),med=median(value),max=max(value),min=min(value)) %>% 
+  ggplot(aes(x=value))+geom_histogram()+facet_wrap(~name)+
+  labs(x='Out-of-Sample Error',title='Bottom DO - Functional Regression Model')
+
 #Compare models --------------------------
 
 #RMSE
@@ -190,3 +341,19 @@ sapply(modList1,function(i) getDF(i$bottom))[which.min(sapply(modList1,function(
 sapply(modList2,function(i) getDF(i$bottom))[which.min(sapply(modList2,function(i) rmse(i$bottom)))]
 bWatMod$df.residual
 
+
+#Compare lagged linear to FR model
+frStats <- pivot_longer(bind_rows(cvPredList3),RMSE:MAE) %>% group_by(name) %>% 
+  summarize(mean=mean(value),med=median(value),max=max(value),min=min(value)) %>% 
+  rename(errType=name) %>% mutate(errType=factor(errType,labels=c('MAE','RMSE')))
+
+cvPredList %>% filter(depth=='bottom') %>% group_by(lag,errType) %>% 
+  summarize(mean=mean(value),med=median(value),max=max(value),min=min(value)) %>% 
+  mutate(errType=factor(errType,labels=c('MAE','RMSE'))) %>% 
+  ggplot(aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+  geom_line()+
+  geom_hline(data=frStats,aes(yintercept = med),col='red')+
+  geom_hline(data=frStats,aes(yintercept = max),col='red',linetype='dashed')+
+  geom_hline(data=frStats,aes(yintercept = min),col='red',linetype='dashed')+
+  facet_wrap(~errType)+
+  labs(x='Time lag',y='Out-of-Sample Error',title='Bottom DO - Lagged Linear vs Functional Regression')

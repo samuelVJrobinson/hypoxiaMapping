@@ -117,14 +117,24 @@ rescale <- function(x,lwr=NA,upr=NA){
 
 #Mean absolute error
 mae <- function(mod){
-  if(!any(c('lm','gam') %in% class(mod))) return(NA)
-  return(mean(abs(resid(mod))))
+  if(any(c('lm','gam') %in% class(mod))){
+    return(mean(abs(resid(mod))))
+  } else if(any(c('numeric','array') %in% class(mod))){
+    return(mean(abs(mod)))
+  } else {
+    return(NA)
+  }
 }
 
 #Root mean square error
 rmse <- function(mod){
-  if(!any(c('lm','gam') %in% class(mod))) return(NA)
-  return(sqrt(mean(resid(mod)^2)))
+  if(any(c('lm','gam') %in% class(mod))){
+    return(mean(abs(resid(mod))))
+  } else if(any(c('numeric','array') %in% class(mod))){
+    return(sqrt(mean(mod^2)))
+  } else {
+    return(NA)
+  }
 } 
 
 #R2 from lm objects
@@ -133,4 +143,11 @@ getR2 <- function(mod) if(class(mod)!='lm') return(NA) else summary(mod)$r.squar
 #DF
 getDF <- function(mod) if(class(mod)!='lm') return(NA) else mod$df.residual 
   
-  
+#Returns vector of random T/F of same length as dataframe d, where p = prob of T
+makeTF <- function(d,p){ 
+  N <- nrow(d)
+  numT <- round(N*p)
+  numF <- N-numT
+  tf <- sample(c(rep(T,numT),rep(F,numF)))
+  return(tf)
+}  
