@@ -129,7 +129,7 @@ mae <- function(mod){
 #Root mean square error
 rmse <- function(mod){
   if(any(c('lm','gam') %in% class(mod))){
-    return(mean(abs(resid(mod))))
+    return(sqrt(mean(resid(mod)^2)))
   } else if(any(c('numeric','array') %in% class(mod))){
     return(sqrt(mean(mod^2)))
   } else {
