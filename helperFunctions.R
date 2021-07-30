@@ -116,25 +116,33 @@ rescale <- function(x,lwr=NA,upr=NA){
 }
 
 #Mean absolute error
-mae <- function(mod){
+mae <- function(mod,backTrans=NULL){
   if(any(c('lm','gam') %in% class(mod))){
-    return(mean(abs(resid(mod))))
+    res <- resid(mod)
   } else if(any(c('numeric','array') %in% class(mod))){
-    return(mean(abs(mod)))
+    res <- mod
   } else {
     return(NA)
   }
+  if(!is.null(backTrans)){ #Transform before summation
+    res <- eval(call(backTrans,res))
+  }
+  mean(abs(res))
 }
 
 #Root mean square error
-rmse <- function(mod){
+rmse <- function(mod,backTrans=NULL){
   if(any(c('lm','gam') %in% class(mod))){
-    return(sqrt(mean(resid(mod)^2)))
+    res <- resid(mod)
   } else if(any(c('numeric','array') %in% class(mod))){
-    return(sqrt(mean(mod^2)))
+    res <- mod
   } else {
     return(NA)
   }
+  if(!is.null(backTrans)){ #Transform before summation
+    res <- eval(call(backTrans,res))
+  }
+  sqrt(mean(res^2))
 } 
 
 #R2 from lm objects

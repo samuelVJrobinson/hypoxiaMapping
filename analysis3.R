@@ -25,10 +25,11 @@ load('./data/all2014.Rdata')
 load('./data/PCmods.RData')
 
 #Get predictions of PCs at all locations through the entire season. If PC values missing, fill using PC model
-sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.)) %>% 
-  mutate(predPC3=predict(PCmod3,newdata=.),predPC4=predict(PCmod4,newdata=.),predPC5=predict(PCmod5,newdata=.)) %>% 
-  mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3),PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC4,PC5)) %>% 
-  select(-predPC1:-predPC5) %>% 
+sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.),predPC3=predict(PCmod3,newdata=.)) %>% 
+  mutate(predPC4=predict(PCmod4,newdata=.),predPC5=predict(PCmod5,newdata=.),predPC6=predict(PCmod6,newdata=.)) %>% 
+  mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>% 
+  mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>% 
+  select(-predPC1:-predPC6) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) 
 
 #Fit model of DO to gap-filled PCs ----------------------------------
@@ -48,9 +49,9 @@ fitLagMods <- function(i,dat=sDat,interaction=FALSE){
   
   
   if(!interaction){
-    #Fit simple linear models use PC1:5
-    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=sWatTemp)
-    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5,data=bWatTemp)
+    #Fit simple linear models use PC1:6
+    sMod <- lm(DO~PC1+PC2+PC3+PC4+PC5+PC6,data=sWatTemp)
+    bMod <- lm(DO~PC1+PC2+PC3+PC4+PC5+PC6,data=bWatTemp)
     
   } else {
     #Interaction models
@@ -66,6 +67,9 @@ fitLagMods <- function(i,dat=sDat,interaction=FALSE){
 
 modList1 <- lapply(lags,fitLagMods,interaction=FALSE)
 modList2 <- lapply(lags,fitLagMods,interaction=TRUE)
+
+m1 <- modList1[[4]]$bottom #Save day 4
+save(m1,file = './data/lagLinMod.Rdata')
 
 #Get plots of MSE and R-squared
 p1 <- data.frame(lag=lags,
@@ -171,8 +175,7 @@ cvPredErrs <- function(i,inter=FALSE){
   })
 }
 
-#Get prediction errors for surface/bottom, using RMSE, MAE, and R2
-# 
+# # Get prediction errors for surface/bottom, using RMSE, MAE, and R2
 # library(parallel)
 # cluster <- makeCluster(15)
 # clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
@@ -188,7 +191,6 @@ cvPredErrs <- function(i,inter=FALSE){
 # 
 # cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
 #   mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Interaction')
-# 
 # save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
 
 load('./data/cvPredLists.Rdata')
@@ -213,8 +215,7 @@ cvPredList %>% filter(errType!='R2') %>%
   pivot_wider(names_from=errType,values_from = c(med,iqr)) %>% 
   mutate(minMAE=med_MAE==min(med_MAE),minRMSE=med_RMSE==min(med_RMSE)) %>% 
   filter(minMAE|minRMSE) %>% data.frame()
-  
- 
+
 # Fit FR model of DO to gap-filled PCs ------------------------------------
 
 NdayLag <- 30 #30 days in past
@@ -224,9 +225,9 @@ dayLags <- -NdayForward:NdayLag
 #Matrices to store PCA predictions for past 0:30 days
 predMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
                   dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
-pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat)
+pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat,PCA6=predMat)
 
-for(p in 1:5){ #PCA dimensions
+for(p in 1:6){ #PCA dimensions
   for(i in 1:nrow(bottomWDat)){ #For each bottom water measurement
     getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags #Which days are 0-30 days behind the measurement?
     pcaMatList[[p]][i,] <- sDat %>% filter(sDat$YEID == bottomWDat$YEID[i] & sDat$doy %in% getDays) %>% pull(paste0('PC',p)) 
@@ -239,26 +240,29 @@ fdat <- list(DO_bottom=bottomWDat$DO,
              dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
              pcaMat1=pcaMatList$PCA1,pcaMat2=pcaMatList$PCA2,
              pcaMat3=pcaMatList$PCA3,pcaMat4=pcaMatList$PCA4,
-             pcaMat5=pcaMatList$PCA5,doy=bottomWDat$doy,
+             pcaMat5=pcaMatList$PCA5,pcaMat6=pcaMatList$PCA6,
+             doy=bottomWDat$doy,
              sE=bottomWDat$sE,sN=bottomWDat$sN,
              maxDepth=bottomWDat$maxDepth)
 
 basisType <- 'cr' #Cubic regression splines
 #Fit FDA models 
 bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
-                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType), 
+                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
+                 s(dayMat,by=pcaMat6,bs=basisType), 
                data=fdat) #Bottom water
+# save(bWatMod,file = './data/funRegMod.Rdata')
 
-summary(bWatMod) #R-squared of about 0.50
+summary(bWatMod) #R-squared of about 0.61
 par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
-p1 <- lapply(1:5,function(i){
+p1 <- lapply(1:6,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
-  smoothPred(m=bWatMod,dat=d,whichSmooth=i) 
-}) %>% set_names(paste0('PCA',1:5)) %>% bind_rows(.id='PC') %>% 
+  smoothPred(m=bWatMod,dat=d,whichSmooth=i)}) %>% 
+  set_names(paste0('PCA',1:6)) %>% bind_rows(.id='PC') %>% 
   select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+
@@ -362,7 +366,7 @@ llModWithin <- data.frame(lag=lags,MAE=sapply(modList1,function(i) mae(i$bottom)
 
 llModErr <- cvPredList %>% mutate(lag=lag-1) %>% group_by(lag,errType) %>% 
   summarize(med=median(value),max=max(value),min=min(value),iqr=IQR(value)) %>% 
-  left_join(withinSamp,by=c('lag','errType'))
+  left_join(llModWithin,by=c('lag','errType'))
 
 p1 <- ggplot(llModErr,aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
   geom_line()+geom_line(aes(y=withinSampErr),col='red')+facet_wrap(~errType,ncol=1,scales='free_y')+
@@ -378,7 +382,7 @@ p2 <- fdaErr %>%
   ggplot(aes(x=value))+#geom_freqpoly()+
   geom_histogram(fill='black',alpha=0.3,binwidth = 0.02)+
   geom_vline(aes(xintercept=med),col='black')+
-  geom_vline(data=withinSamp2,aes(xintercept=value),col='red')+
+  geom_vline(data=fdaWithin,aes(xintercept=value),col='red')+
   facet_wrap(~name,ncol=1,scales='free_y')+
   labs(x='Model Accuracy',title='Functional Data Analysis',y='Count')+
   coord_flip()

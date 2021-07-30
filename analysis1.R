@@ -39,17 +39,20 @@ source('helperFunctions.R')
 # #Get locations from wDat to join onto spatial data
 # locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
 # 
+# #Set lowest positive number for spectral variables
+# lwrLimits <- c(0.1026964,5e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09)
+# names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678')
+# 
 # #Spectral data
 # sDat <- read.csv('./data/sample_spectralData.csv') %>%
 #   left_join(locIndex,by='YEID') %>% #Join in spatial info
 #   select(-Date,-doy) %>%
 #   st_as_sf() %>%
 #   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-#   # mutate(across(chlor_a:poc,fixNeg2)) %>%  #Change negative values to 95% of smallest + values
-#   # mutate(nflh=ifelse(nflh>1,1,nflh)) #Limits nflh to less than 1
-#   mutate(poc=ifelse(poc>quantile(poc,0.008,na.rm=TRUE),poc,quantile(poc,0.008,na.rm=TRUE))) %>%
-#   mutate(nflh=rescale(fixNeg(nflh,0.95),1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
-#   mutate(across(chlor_a:Rrs_678,~rescale(.x,lwr=min(.x[.x>0],na.rm=TRUE)*0.99,upr=NA))) %>% #Rescales values to above 0.99*min + value
+#   # mutate(poc=ifelse(poc>25,poc,25)) %>% #Sets bottom limit of poc as 25 (a bit less than minimum positive #)
+#   # mutate(nflh=ifelse(nflh>4.75e-05,nflh,4.75e-05)) %>% #Sets bottom limit of nflh as 4.75e-05, formerly used fixNeg(nflh,0.95)
+#   mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
+#   mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>% #Rescales negative values be above 0.95*minimum positive value
 #   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
 #   mutate(propNA=numNA/max(numNA))
 # 
@@ -87,12 +90,12 @@ source('helperFunctions.R')
 # # sDatMat_noNA <- as.matrix(sDatMat[apply(sDatMat,1,function(x) sum(is.na(x)))==0,]) #No NA values
 # # pca <- prcomp(sDatMat_noNA,scale. = TRUE)
 # # plot(1:14,cumsum(pca$sdev^2)/sum(pca$sdev^2),xlab='PC',ylab='% Var',pch=19,type='b')
-# # abline(h=0.95,col='red') #Looks like about 5 dims are needed for 95% of variance
+# # abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
 # # #Singular value decomposition - identical
 # # svdMat <- svd(scale(sDatMat_noNA)) #First 2 dimensions
 # # plot(svdMat$d^2/sum(svdMat$d^2),ylab='Relative variance',xlab='Eigenvalue',pch=19)
 # # plot(cumsum(svdMat$d^2)/sum(svdMat$d^2),ylab='Cumulative variance',xlab='Eigenvalue',pch=19,type='b')
-# # abline(h=0.95,col='red') #Looks like about 5 dims are needed for 95% of variance
+# # abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
 # # plot(log(pca$sdev),log(svdMat$d)) #Similar things
 # 
 # # n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes a minute or so
@@ -104,32 +107,41 @@ source('helperFunctions.R')
 # 
 # pca1 <- prcomp(sDatMat_imputed$completeObs,scale=TRUE) #Get PCA values
 # 
-# # Looks like about 4 dims are needed for 95% of variance, 5 for 97.5%
+# # Looks like about 6 dims are needed for 95% of variance
 # (p <- data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
 #   ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
 #   labs(x='Principle Component',y='Cumulative Variance')+
 #   geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
-# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #97% of var in first 5 PCs
+# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #97% of var in first 6 PCs
 # ggsave('./figures/pcVar.png',p,width=5,height=5)
 # 
-# #Factor loadings of first 5 PCs
-# p <- pca1$rotation[,1:5] %>% data.frame() %>% rownames_to_column(var='var') %>%
-#   pivot_longer(PC1:PC5) %>%
-#   mutate(name=factor(name,labels=paste0('PC',1:5,': ',round(pca1$sdev[1:5]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
+# #Factor loadings of first 6 PCs
+# p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
+#   pivot_longer(PC1:PC6) %>%
+#   mutate(name=factor(name,labels=paste0('PC',1:6,': ',round(pca1$sdev[1:6]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
 #   mutate(var=factor(var,levels=rev(unique(var)))) %>%
 #   ggplot()+
 #   # geom_point(aes(y=var,x=value))+
 #   geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
 #   facet_wrap(~name)+
-#   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-5')
+#   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6')
 # ggsave('./figures/factorLoadings.png',p,width=10,height=5)
 # 
+# # #Make PC scores using center, scale, and rotation matrix
+# # sDatMat_imputed$completeObs[1,] #Input data
+# # pca1$x[1,] #PC scores (goal)
+# # pca1$sdev #sqrt-Eigenvalues
+# # pca1$rotation #Factor loadings
+# # pca1$center #Mean of original data
+# # pca1$scale #SD of original data
+# # ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Works, almost identical
+# 
 # #Join imputed PCA values back to original dataset (NA if no data on that day)
-# sDat_pca <- pca1$x[,1:5] %>% as.data.frame() %>% rownames_to_column('ID')
+# sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
 # sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
 #   left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
 # rm(sDat_pca,sDatMat_imputed,sDatMat) #cleanup
-# save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,file='./data/all2014.Rdata')
+# save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014.Rdata')
 
 #Load data from saved file
 load('./data/all2014.Rdata')
@@ -598,7 +610,7 @@ p1 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% st_jitter(factor=0.01) %>%
 p2 <- surfWDat %>% mutate(resid=resid(sWatMod)) %>% ggplot()+geom_point(aes(x=doy,y=resid))+geom_hline(yintercept = 0)
 ggarrange(p1,p2,ncol=1)
 
-# Fit GAMs of PC1:PC4 ----------------------------------------------------------
+# Fit GAMs of PC1:PC6 ----------------------------------------------------------
 
 #Load smoothers
 load('./data/PCmods.RData')
@@ -607,19 +619,30 @@ load('./data/PCmods.RData')
 # pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
 #   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
 # 
-# PCmod1 <-gam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-# PCmod2 <-gam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-# PCmod3 <-gam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-# PCmod4 <-gam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-# PCmod5 <-gam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat)
-# save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,file='./data/PCmods.RData')
+# library(parallel)
+# cl <- makeCluster(10)
+# 
+# PCmod1 <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# PCmod2 <-bam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# PCmod3 <-bam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# PCmod4 <-bam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# PCmod5 <-bam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# PCmod6 <-bam(PC6~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods.RData')
 
 par(mfrow=c(2,2)); 
 gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
+summary(PCmod1)
 gam.check(PCmod2); abline(0,1,col='red'); 
+summary(PCmod2)
 gam.check(PCmod3); abline(0,1,col='red'); 
-gam.check(PCmod4); abline(0,1,col='red'); #Bunch of lower outliers
-gam.check(PCmod5); abline(0,1,col='red'); 
+summary(PCmod3)
+gam.check(PCmod4); abline(0,1,col='red'); #Bunch of lower outliers. Poor R2
+summary(PCmod4)
+gam.check(PCmod5); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
+summary(PCmod5)
+gam.check(PCmod6); abline(0,1,col='red'); # Cluster of high residuals. Poor R2
+summary(PCmod6)
 par(mfrow=c(1,1))
 
 # #Haven't gotten this to complete fitting yet. Also doesn't account for spatial correlation
@@ -684,7 +707,8 @@ predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>%
   mutate(PC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(PC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(PC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(PC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(PC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(PC6=predict(PCmod6,newdata=.),sePC6=predict(PCmod6,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
 
 lags <- 0:30 #Try 0 to 30 day lags
