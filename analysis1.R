@@ -612,16 +612,12 @@ ggarrange(p1,p2,ncol=1)
 
 # Fit GAMs of PC1:PC6 ----------------------------------------------------------
 
-#Load smoothers
-load('./data/PCmods.RData')
+#Get smoothers
+pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
+  mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
 
-# #Get smoothers
-# pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
-#   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
-# 
 # library(parallel)
 # cl <- makeCluster(10)
-# 
 # PCmod1 <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod2 <-bam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod3 <-bam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
@@ -629,6 +625,7 @@ load('./data/PCmods.RData')
 # PCmod5 <-bam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod6 <-bam(PC6~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods.RData')
+load('./data/PCmods.RData')
 
 par(mfrow=c(2,2)); 
 gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK

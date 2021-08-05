@@ -8,6 +8,7 @@ theme_set(theme_bw()) #Good for maps
 library(sf)
 library(raster)
 library(mgcv)
+library(parallel)
 source('helperFunctions.R')
 
 load('./data/all2014.Rdata')
@@ -104,23 +105,6 @@ locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table fo
 
 rm(obs,sDat,withinBuff); gc()
 
-# Fit models of PCs ---------------------------------
-
-##NOT NEEDED IF USING TEMPORAL AGGREGATION
-# library(parallel)
-# cl <- makeCluster(15)
-# #Takes about 10 minutes using 10 cores
-# bFuns <- c('tp','tp'); kNum <- c(60,10); dNum <- c(2,1)
-# a <- Sys.time()
-# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# Sys.time()-a
-# stopCluster(cl)
-
 # Get predictions from lagged linear model --------------------
 
 load('./data/lagLinMod.Rdata')
@@ -207,33 +191,68 @@ dayLab <- paste(dayLab[1:length(dayLab)-1],':',dayLab[2:length(dayLab)])
 ggsave(p1,filename = './figures/mapLLpred2.png',width=14,height=8)
   
   
-#To do: Function to get predictions from FR model ------------------------------
-getFRpred <- function(l,d,m,daylag=0:30){ #l = location ID, d = day
-  
-  t(sapply(c(182,196,213,227),function(x){
-    getLLpred(24672,x,m1)
-  }))
-  
-  
-  
-  newdat <- list(sN=locLookup$sN[which(locLookup$loc==l)],
-                       sE=locLookup$sE[which(locLookup$loc==l)],
-                       doy=d)
-  d <- d-daylag #Lagged days to get data from
-  
-  use <- which(sDat2$doy==d & sDat2$loc==l) #Find matching rows in sDat2
-  # if(length(use)==1){ #If data exists at that location/time, get from sDat2
-  #   newdat <- cbind(newdat,sDat2[use,grepl('PC',colnames(sDat2))])
-  #   newdat$geometry <- NULL
-  # } else { #If not, get from GAM models
-  #   newdat$PC1 <- predict(PCmod1, newdat)
-  #   newdat$PC2 <- predict(PCmod2, newdat)
-  #   newdat$PC3 <- predict(PCmod3, newdat)
-  #   newdat$PC4 <- predict(PCmod4, newdat)
-  #   newdat$PC5 <- predict(PCmod5, newdat)
-  #   newdat$PC6 <- predict(PCmod6, newdat)
-  # }
-  # predDO <- predict(m,newdat)
-  # return(predDO)
-}
+#Get predictions from FR model ------------------------------
+
+# #Fit PC models
+# library(parallel)
+# cl <- makeCluster(15)
+# #Takes about 10 minutes using 10 cores
+# bFuns <- c('tp','tp'); kNum <- c(60,10); dNum <- c(2,1)
+# a <- Sys.time()
+# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# Sys.time()-a
+# stopCluster(cl)
+# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
+load('./data/PCmods_mapping.RData')
+
+load('./data/funRegMod.Rdata')
+
+# l <- 34405
+# d <- c(200,211)
+l <- sort(unique(locLookup$loc))
+d <- 200
+daylag <- 30
+cl <- makeCluster(15)
+
+a <- Sys.time() #~1.7 mins for all locations on a single day
+newDF <- expand_grid(doy=unique(do.call('c',lapply(d,function(x) x-(daylag:0)))),loc=l) %>% 
+  left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
+  left_join(st_drop_geometry(locLookup),by='loc')
+
+newDF <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF) %>% 
+  set_names(paste0('predPC',1:6)) %>% bind_cols() %>% bind_cols(newDF,.) %>% 
+  mutate(PC1=ifelse(is.na(PC1),predPC1,PC1),PC2=ifelse(is.na(PC2),predPC2,PC2),PC3=ifelse(is.na(PC3),predPC3,PC3)) %>%
+  mutate(PC4=ifelse(is.na(PC4),predPC4,PC4),PC5=ifelse(is.na(PC5),predPC5,PC5),PC6=ifelse(is.na(PC6),predPC6,PC6)) 
+  # dplyr::select(-contains('pred'),-contains('s'))
+
+Sys.time()-a
+stopCluster(cl)
+
+datList <- with(expand.grid(l=l,d=d),list(loc=l,doy=d))
+
+datList$dayMat <- outer(rep(1,length(datList$doy)),0:daylag)
+
+pcaMats <- lapply(paste0('PC',1:6),function(x){
+  newDF %>% dplyr::select(doy,loc,x) %>% 
+    mutate(doy=abs(doy-max(doy))) %>% 
+    arrange(doy,loc) %>% 
+    mutate(doy=paste0('d',doy)) %>% 
+    pivot_wider(values_from = x, names_from = doy) %>% 
+    column_to_rownames('loc') %>% as.matrix()
+}) %>% set_names(paste0('pcaMat',1:6))
+
+datList <- c(datList,pcaMats)
+
+#Problem: predictions are way out of the range of actual data
+locLookup %>% arrange(loc) %>% 
+  mutate(predDO=predict(bWatMod,newdata=datList)) %>% 
+  mutate(under=predDO<0,predDO=ifelse(under,NA,predDO)) %>% 
+  ggplot(aes(geometry=geometry))+
+  geom_sf(aes(col=predDO))
+
 
