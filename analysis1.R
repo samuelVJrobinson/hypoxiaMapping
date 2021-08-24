@@ -18,6 +18,7 @@ setwd("~/Documents/hypoxiaMapping")
 source('helperFunctions.R')
 
 # Load data --------------------
+
 # #Water data from scratch
 # wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>%
 #   mutate(doy=as.numeric(format(Date,format='%j'))) %>%
@@ -49,8 +50,6 @@ source('helperFunctions.R')
 #   select(-Date,-doy) %>%
 #   st_as_sf() %>%
 #   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-#   # mutate(poc=ifelse(poc>25,poc,25)) %>% #Sets bottom limit of poc as 25 (a bit less than minimum positive #)
-#   # mutate(nflh=ifelse(nflh>4.75e-05,nflh,4.75e-05)) %>% #Sets bottom limit of nflh as 4.75e-05, formerly used fixNeg(nflh,0.95)
 #   mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
 #   mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>% #Rescales negative values be above 0.95*minimum positive value
 #   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns

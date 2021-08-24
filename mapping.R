@@ -63,20 +63,22 @@ sDat <- lapply(files$combined,function(datPath){
   names(sD) <- cNames #Add names
   sD2 <- rasterToPoints(sD) #Convert to point dataframe
   nMissing <- apply(sD2[,!grepl('(x|y)',colnames(sD2))],1,function(x) sum(is.na(x))) #Proportion of missing values in each row (cell)
-  sD2 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2],sD2[nMissing<5,]) %>% #Keep points with 4 or more, and add date
-    mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) #Rescales negative values be above 0.95*minimum positive value
+  sD2 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2],sD2[nMissing<5,]) #Keep points with 4 or more, and add date
   return(sD2)
 }) #Takes about 10 seconds
 names(sDat) <- sapply(sDat,function(x) x$doy[1])
 
+#Preview day 152
 # sDat[[1]] %>% #Chlor_a on day 152
 #   filter(x>(-86.75),x<(-86.25),y<30.2,y>29.8) %>%
 #   ggplot(aes(x=x,y=y,fill=chlor_a))+
 #   geom_raster()
 
-#Decided to non-complete cells - lots of completely missing cells already, so this doesn't hurt that much
+#Decided to omit non-complete cells - lots of completely missing cells already, so this doesn't hurt that much
 sDat2 <- do.call('rbind',sDat) %>% na.omit() %>% #Combine into single DF and remove NAs
   mutate(doy=as.numeric(doy)) %>% #Convert to numeric
+  mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
+  mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>% #Rescales negative values be above 0.95*minimum positive value
   mutate(across(chlor_a:sst,log)) #Log-transform
 summary(sDat2)
 
@@ -217,19 +219,17 @@ load('./data/funRegMod.Rdata')
 l <- sort(unique(locLookup$loc))
 d <- 200
 daylag <- 30
-cl <- makeCluster(15)
 
+cl <- makeCluster(15)
 a <- Sys.time() #~1.7 mins for all locations on a single day
 newDF <- expand_grid(doy=unique(do.call('c',lapply(d,function(x) x-(daylag:0)))),loc=l) %>% 
   left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
   left_join(st_drop_geometry(locLookup),by='loc')
-
 newDF <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF) %>% 
   set_names(paste0('predPC',1:6)) %>% bind_cols() %>% bind_cols(newDF,.) %>% 
   mutate(PC1=ifelse(is.na(PC1),predPC1,PC1),PC2=ifelse(is.na(PC2),predPC2,PC2),PC3=ifelse(is.na(PC3),predPC3,PC3)) %>%
   mutate(PC4=ifelse(is.na(PC4),predPC4,PC4),PC5=ifelse(is.na(PC5),predPC5,PC5),PC6=ifelse(is.na(PC6),predPC6,PC6)) 
   # dplyr::select(-contains('pred'),-contains('s'))
-
 Sys.time()-a
 stopCluster(cl)
 
@@ -251,8 +251,53 @@ datList <- c(datList,pcaMats)
 #Problem: predictions are way out of the range of actual data
 locLookup %>% arrange(loc) %>% 
   mutate(predDO=predict(bWatMod,newdata=datList)) %>% 
-  mutate(under=predDO<0,predDO=ifelse(under,NA,predDO)) %>% 
+  # mutate(under=predDO<0,predDO=ifelse(under,NA,predDO)) %>% 
   ggplot(aes(geometry=geometry))+
-  geom_sf(aes(col=predDO))
+  geom_sf(aes(col=predDO),size=0.1)+
+  labs(title='DO on Day 200')+
+  scale_colour_distiller(type='seq',palette='RdYlGn',direction=1)
+
+## Range of raw spectral vars for original model (sDat)
+
+## sDat %>% dplyr::select(chlor_a:sst) %>% st_drop_geometry() %>% as.list() %>% sapply(.,range,na.rm=TRUE)
+#         chlor_a    nflh      poc    Rrs_412    Rrs_443      Rrs_469     Rrs_488     Rrs_531     Rrs_547     Rrs_555   Rrs_645    Rrs_667    Rrs_678    sst
+# [1,]  0.1026964 0.00001    31.16 9.5000e-10 9.5000e-10 1.710095e-05 0.000452001 0.000770001 0.000822001 0.000566001 9.500e-10 9.5000e-10 9.5000e-10 12.645
+# [2,] 98.1391449 0.99999 12953.40 1.1678e-02 1.3172e-02 1.628600e-02 0.018146001 0.019711001 0.021056001 0.020276001 1.681e-02 1.5234e-02 1.4894e-02 34.385
+
+#Range for mapping model raw vars
+#          chlor_a         nflh     poc    Rrs_412    Rrs_443    Rrs_469     Rrs_488     Rrs_531     Rrs_547     Rrs_555    Rrs_645    Rrs_667    Rrs_678    sst
+# [1,]  0.02460281 7.499941e-06    15.0 9.5000e-10 9.5000e-10 1.0000e-09 0.000150001 0.000512001 0.000802001 0.000336001 9.5000e-10 9.5000e-10 9.5000e-10 23.430
+# [2,] 99.07888031 1.207985e+00 12953.4 2.1314e-02 1.6558e-02 1.9234e-02 0.020298000 0.024560001 0.025778001 0.024768000 2.0126e-02 1.8378e-02 1.7658e-02 35.615
+
+# nflh >1 and sst higher for mapping vars. nflh can be rescaled, but unclear why sst is higher in larger dataset
+
+## Original Vars
+# #After log-transformation
+# #apply(sDatMat,2,range,na.rm=TRUE)
+#        chlor_a          nflh      poc    Rrs_412    Rrs_443    Rrs_469   Rrs_488   Rrs_531   Rrs_547   Rrs_555    Rrs_645    Rrs_667    Rrs_678      sst
+# [1,] -2.275978 -11.51293     3.439135 -20.774559 -20.774559 -10.976377 -7.701826 -7.169119 -7.103769 -7.476915 -20.774559 -20.774559 -20.774559 2.583998
+# [2,]  4.586386 -1.000005e-05 9.469114  -4.450048  -4.329662  -4.117449 -4.009305 -3.926578 -3.860570 -3.898317  -4.085781  -4.184225  -4.206797 3.537620
+
+# Mapping vars
+# After log-transformation
+# apply(obs,2,range)
+#        chlor_a          nflh      poc    Rrs_412    Rrs_443    Rrs_469   Rrs_488   Rrs_531   Rrs_547   Rrs_555    Rrs_645    Rrs_667    Rrs_678      sst
+# [1,] -3.704894 -11.51293     2.708050 -20.774559 -20.774559 -13.121864 -8.166533 -7.293416 -7.128401 -7.794485 -20.774559 -20.774559 -20.774559 3.158382
+# [2,]  4.595916 -1.000005e-05 9.469114  -3.848391  -4.100886  -4.075248 -3.947961 -3.754165 -3.695542 -3.700871  -3.905743  -3.996601  -4.036566 3.572767
+
+## Range of predictor PCs from original FR model (bWatMod)
+#           PCA1      PCA2     PCA3      PCA4      PCA5      PCA6
+# [1,] -5.951780 -5.278781 -4.41731 -6.213804 -4.474055 -2.894709
+# [2,]  9.661089 10.172015  3.28938  2.703307  6.635784  5.546856
+
+## Range of predictors PCs from updated models
+## sDat2 %>% st_drop_geometry() %>% dplyr::select(PC1:PC6) %>% as.list() %>% sapply(.,range)
+#             PC1       PC2       PC3       PC4        PC5       PC6
+# [1,] -0.8211135 -3.103531 -1.599118 -4.384769 -60.526401 -1.172665
+# [2,]  0.8562502 10.201641  2.135778  1.345465   8.086439  5.106161
+
+# PC1 = range too small
+# PC5 = range too large
 
 
+#
