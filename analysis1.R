@@ -41,7 +41,7 @@ source('helperFunctions.R')
 # locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
 # 
 # #Set lowest positive number for spectral variables
-# lwrLimits <- c(0.1026964,5e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09)
+# lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09)
 # names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678')
 # 
 # #Spectral data
@@ -50,8 +50,9 @@ source('helperFunctions.R')
 #   select(-Date,-doy) %>%
 #   st_as_sf() %>%
 #   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-#   mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
-#   mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>% #Rescales negative values be above 0.95*minimum positive value
+#   mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) %>% #Set upper limit of nflh just below 1
+#   #Rescales negative values be above 0.95*minimum positive value
+#   mutate(across(chlor_a:Rrs_678,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
 #   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
 #   mutate(propNA=numNA/max(numNA))
 # 
@@ -133,7 +134,11 @@ source('helperFunctions.R')
 # # pca1$rotation #Factor loadings
 # # pca1$center #Mean of original data
 # # pca1$scale #SD of original data
-# # ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Works, almost identical
+# # 
+# # #Does this work?
+# # ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
+# # pca1$x[1,] #PCs from method
+# # (((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
 # 
 # #Join imputed PCA values back to original dataset (NA if no data on that day)
 # sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
@@ -613,16 +618,18 @@ ggarrange(p1,p2,ncol=1)
 
 #Get smoothers
 pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
-  mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a bit of random noise to make sure that distances between points aren't 0
+  mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a tiny bit of noise to make sure that distances between points isn't exactly 0
 
 # library(parallel)
-# cl <- makeCluster(10)
+# cl <- makeCluster(15)
+# a <- Sys.time()
 # PCmod1 <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod2 <-bam(PC2~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod3 <-bam(PC3~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod4 <-bam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod5 <-bam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod6 <-bam(PC6~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
+# a-Sys.time() #4.2 mins
 # save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods.RData')
 load('./data/PCmods.RData')
 
@@ -650,6 +657,7 @@ summary(PCmod2)
 summary(PCmod3) 
 summary(PCmod4) #Not as good
 summary(PCmod5) #Not as good
+summary(PCmod6) #Not as good
 
 #See how predictions look on spatial grid - takes a few minutes
 predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
@@ -778,7 +786,7 @@ p3 <- data.frame(lag=lags,
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+facet_wrap(~name)+
   labs(x='Time lag',y='R-squared',col='Model\nType')
 
-p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+(p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') )
 ggsave('./figures/lagPCAmod_smoothed.png',p,width=8,height=8)
 
 # Functional regression using PCAs ----------------------------------------
@@ -790,9 +798,9 @@ dayLags <- -NdayForward:NdayLag
 #Matrices to store PCA predictions for past 0:30 days
 predMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
                        dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
-pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat)
+pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat,PCA6=predMat)
 
-for(p in 1:5){ #PCA dimensions
+for(p in 1:6){ #PCA dimensions
   for(i in 1:nrow(bottomWDat)){ #For each bottom water measurement
     getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags #Which days are 0-30 days behind the measurement?
     pcaMatList[[p]][i,] <- predPC[predPC$YEID == bottomWDat$YEID[i] & predPC$doy %in% getDays,paste0('PC',p)]
@@ -800,29 +808,29 @@ for(p in 1:5){ #PCA dimensions
 }
 
 #Data for functional regression
-fdat2 <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
+fdat2 <- list(DO_bottom=bottomWDat$DO,#DO_surf=surfWDat$DO,
              dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
              pcaMat1=pcaMatList$PCA1,pcaMat2=pcaMatList$PCA2,
              pcaMat3=pcaMatList$PCA3,pcaMat4=pcaMatList$PCA4,
-             pcaMat5=pcaMatList$PCA5,
+             pcaMat5=pcaMatList$PCA5,pcaMat6=pcaMatList$PCA6,
              doy=bottomWDat$doy,sE=bottomWDat$sE,sN=bottomWDat$sN,
              maxDepth=bottomWDat$maxDepth)
 
 basisType <- 'cr' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
 #Fit FDA models 
 bWatMod2 <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
-                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType), 
+                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+s(dayMat,by=pcaMat6,bs=basisType), 
                data=fdat2) #Bottom water
-summary(bWatMod2) #R-squared of about 0.56
+summary(bWatMod2) #R-squared of about 0.60
 par(mfrow=c(2,2)); gam.check(bWatMod2); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod2,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
-p1 <- lapply(1:5,function(i){
+p1 <- lapply(1:6,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
   smoothPred(m=bWatMod2,dat=d,whichSmooth=i) 
-}) %>% set_names(paste0('PCA',1:5)) %>% bind_rows(.id='PC') %>% 
+}) %>% set_names(paste0('PCA',1:6)) %>% bind_rows(.id='PC') %>% 
   select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+

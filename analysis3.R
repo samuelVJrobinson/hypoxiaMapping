@@ -68,9 +68,6 @@ fitLagMods <- function(i,dat=sDat,interaction=FALSE){
 modList1 <- lapply(lags,fitLagMods,interaction=FALSE)
 modList2 <- lapply(lags,fitLagMods,interaction=TRUE)
 
-m1 <- modList1[[4]]$bottom #Save day 4
-save(m1,file = './data/lagLinMod.Rdata')
-
 #Get plots of MSE and R-squared
 p1 <- data.frame(lag=lags,
                  surface1=sapply(modList1,function(i) mae(i$surface)),
@@ -110,7 +107,13 @@ p3 <- data.frame(lag=lags,
 (p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') )
 ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
-#Similar to models using raw data: no local minimum appears
+#Similar to models using raw data: no global minimum appears, but local min at ~10 days
+
+which.min(sapply(modList1,function(i) mae(i$bottom))) #Minimum mae occurs about 10 days before
+which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs about 12 days before
+
+m1 <- modList1[[11]]$bottom #Save day 10
+save(m1,file = './data/lagLinMod.Rdata')
 
 # Cross-validation (use 70%, predict on 30%)
 

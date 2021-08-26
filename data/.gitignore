@@ -1,0 +1,7 @@
+*.RData
+PCmods.RData
+all2014.Rdata
+cvPredLists.Rdata
+errDat.Rdata
+funRegMod.Rdata
+lagLinMod.Rdata

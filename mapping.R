@@ -77,13 +77,15 @@ names(sDat) <- sapply(sDat,function(x) x$doy[1])
 #Decided to omit non-complete cells - lots of completely missing cells already, so this doesn't hurt that much
 sDat2 <- do.call('rbind',sDat) %>% na.omit() %>% #Combine into single DF and remove NAs
   mutate(doy=as.numeric(doy)) %>% #Convert to numeric
-  mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
-  mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>% #Rescales negative values be above 0.95*minimum positive value
-  mutate(across(chlor_a:sst,log)) #Log-transform
+  mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) %>% #Set upper limit of nflh just below 1
+  #Rescales negative values be above 0.95*minimum positive value
+  mutate(across(chlor_a:Rrs_678,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) 
 summary(sDat2)
 
 #Only observations
-obs <- sDat2 %>% dplyr::select(-doy:-y) %>% as.matrix()
+obs <- sDat2 %>% dplyr::select(-doy:-y) %>% 
+  mutate(across(chlor_a:sst,log)) %>%  #Log-transform
+  as.matrix()
 # (obs[c(1),]-pca1$center)/pca1$scale %*% pca1$rotation #Works with a single row
 
 #Calculate PCs 1-6
@@ -174,11 +176,12 @@ load('./data/lagLinMod.Rdata')
 #Other solution that just uses "predict"
 
 #Days to average over
-d <- seq(min(sDat2$doy+4),max(sDat2$doy+4),by=7)
+dayLag <- 10
+d <- seq(min(sDat2$doy+dayLag),max(sDat2$doy+dayLag),by=7)
 dayLab <- format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 dayLab <- paste(dayLab[1:length(dayLab)-1],':',dayLab[2:length(dayLab)])
 
-(p1 <- sDat2 %>% mutate(DO=predict(m1,.),doy=doy+4,doy2=doy) %>% 
+(p1 <- sDat2 %>% mutate(DO=predict(m1,.),doy=doy+dayLag,doy2=doy) %>% 
   mutate(doy=cut(doy,breaks=d,labels=dayLab,include.lowest=TRUE)) %>% 
   filter(!is.na(doy)) %>% 
   st_drop_geometry() %>% 
@@ -191,7 +194,6 @@ dayLab <- paste(dayLab[1:length(dayLab)-1],':',dayLab[2:length(dayLab)])
   labs(title='Minimum 1-week lagged-linear predictions'))
 
 ggsave(p1,filename = './figures/mapLLpred2.png',width=14,height=8)
-  
   
 #Get predictions from FR model ------------------------------
 

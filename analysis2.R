@@ -94,7 +94,7 @@ p3 <- data.frame(lag=lags,
   ggplot()+geom_line(aes(x=lag,y=value,col=modType))+
   geom_vline(xintercept = 0,linetype='dashed')+facet_wrap(~name)+
   labs(x='Time lag',y='R-squared',col='Model Type')
-p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') 
+(p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom'))
 ggsave('./figures/lagPCAmod_raw.png',p,width=8,height=8)
 
 # Functional regression using PCs -------------------------------------------------------------
@@ -106,9 +106,9 @@ dayLags <- -NdayForward:NdayLag
 #Matrices to store PCA predictions for past 0:30 days
 predMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
                   dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
-pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat)
+pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat,PCA6=predMat)
 
-for(p in 1:4){ #PCA dimensions
+for(p in 1:6){ #PCA dimensions
   for(i in 1:nrow(bottomWDat)){ #For each bottom water measurement
     getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags #Which days are 0-30 days behind the measurement?
     pcaMatList[[p]][i,] <- sDat %>% filter(sDat$YEID == bottomWDat$YEID[i] & sDat$doy %in% getDays) %>% pull(paste0('PC',p)) 
@@ -116,10 +116,11 @@ for(p in 1:4){ #PCA dimensions
 }
 
 #Data for functional regression
-fdat <- list(DO_bottom=bottomWDat$DO,DO_surf=surfWDat$DO,
+fdat <- list(DO_bottom=bottomWDat$DO,#DO_surf=surfWDat$DO,
               dayMat=outer(rep(1,nrow(bottomWDat)),dayLags),
               pcaMat1=pcaMatList$PCA1,pcaMat2=pcaMatList$PCA2,
               pcaMat3=pcaMatList$PCA3,pcaMat4=pcaMatList$PCA4,
+              pcaMat5=pcaMatList$PCA5,pcaMat6=pcaMatList$PCA6,
               doy=bottomWDat$doy,sE=bottomWDat$sE,sN=bottomWDat$sN,
               maxDepth=bottomWDat$maxDepth)
 
@@ -128,8 +129,6 @@ plot(0:30,c(sum(!is.na(fdat$pcaMat1[,1])),
   sapply(2:ncol(fdat$pcaMat1),function(x){
   sum(!is.na(apply(fdat$pcaMat1[,c(1:x)],1,sum)))
 })),ylab='Number of non-NA measurements',xlab='Day Lag',pch=19)
-
-
 
 basisType <- 'cr' #Thin-plate regression splines with extra shrinkage. Cubic splines have higher R2 but have very strange shapes
 #Fit FDA models 
