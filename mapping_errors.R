@@ -81,10 +81,8 @@ sDat2 <- do.call('rbind',sDat) %>% na.omit() %>% #Combine into single DF and rem
   mutate(doy=as.numeric(doy)) %>% #Convert to numeric
 
   #I think this is causing the problem:  
-  
   mutate(nflh=rescale(nflh,1e-5,(1-1e-5))) %>% #Rescales nflh to between 0 and 1
   mutate(across(chlor_a:Rrs_678,~ifelse(.x<0,lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) #Rescales negative values be above 0.95*minimum positive value
-
 
   # mutate(across(chlor_a:sst,log)) #Log-transform
 summary(sDat2)
@@ -104,7 +102,7 @@ sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
   geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% #Louisiana offshore
   mutate(sE=(E-mean(unique(E)))/1000,sN=(N-mean(unique(N)))/1000) %>% #Center E/N and convert to km
   mutate(across(E:N,~round(.x))) %>% 
-  st_transform(4326) %>% unite(loc,E,N) %>% 
+  st_transform(4326) %>% unite(loc,E,N,remove = FALSE) %>% 
   mutate(loc=as.numeric(factor(loc)))
 
 withinBuff <- sDat2 %>% st_intersects(.,coastBuff) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
@@ -112,19 +110,21 @@ sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
 locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table for locations
 # ggplot(locLookup)+geom_sf()
 
+
+#Keeping geometry for now
 sDat2 <- sDat2 %>% mutate(doy=as.Date(paste0('2014-',doy),format='%Y-%j')) %>% 
-  rename(date_img=doy) %>% st_drop_geometry()
-sDat_model <- sDat_model %>% st_drop_geometry()
+  rename(date_img=doy)# %>% st_drop_geometry()
+# sDat_model <- sDat_model %>% st_drop_geometry()
 
 # Figures -------------
 head(sDat2)
 head(sDat_model)
 
 #Raw values - scaling of nflh might be causing problems
-temp1 <- sDat2 %>% dplyr::select(date_img:sst) %>% 
+temp1 <- sDat2 %>% st_drop_geometry() %>% dplyr::select(date_img:sst) %>% 
   pivot_longer(cols = -date_img) %>% 
   filter(!is.na(value)) %>% mutate(type='mapping')
-temp2 <- sDat_model %>% dplyr::select(date_img:sst) %>% 
+temp2 <- sDat_model %>% st_drop_geometry() %>% dplyr::select(date_img:sst) %>% 
   pivot_longer(cols = -date_img) %>% 
   filter(!is.na(value)) %>% mutate(type='modeling')
 
@@ -138,10 +138,10 @@ temp2 <- sDat_model %>% dplyr::select(date_img:sst) %>%
   labs(x='Date',y='Value (min-median-max)',title='Raw spectral data',col=NULL)+
   theme(legend.position = 'bottom'))
 
-temp1 <- sDat2 %>% dplyr::select(date_img,contains('PC')) %>% 
+temp1 <- sDat2 %>% st_drop_geometry() %>% dplyr::select(date_img,contains('PC')) %>% 
   pivot_longer(cols = -date_img) %>% 
   filter(!is.na(value)) %>% mutate(type='mapping')
-temp2 <- sDat_model %>% dplyr::select(date_img,contains('PC')) %>% 
+temp2 <- sDat_model %>% st_drop_geometry() %>% dplyr::select(date_img,contains('PC')) %>% 
   pivot_longer(cols = -date_img) %>% 
   filter(!is.na(value)) %>% mutate(type='modeling')
 
@@ -157,3 +157,39 @@ temp2 <- sDat_model %>% dplyr::select(date_img,contains('PC')) %>%
 
 ggsave(p1,filename = './figures/errors_raw.png',width=16,height=10)
 ggsave(p2,filename = './figures/errors_PC.png',width=16,height=10)
+
+#Regression plots
+
+head(sDat2) #Mapping data
+head(sDat_model) #Modeling data
+
+#Restrict model data to date range of mapping data
+temp_modDat <- sDat_model %>% filter(date_img>=min(sDat2$date_img) & date_img<=max(sDat2$date_img)) 
+
+modDatBuff <- temp_modDat %>% st_union() %>% st_convex_hull() %>% st_buffer(dist = 0.5) #0.5 degree buffer around modeling data
+
+temp_locLookup <- slice(locLookup,unlist(st_intersects(modDatBuff,locLookup))) #locLookup locations inside buffer
+
+yeid_lookup <- temp_modDat %>% dplyr::select(YEID) %>% distinct() #Distinct locations for modeling data
+
+yeid_lookup$loc <- temp_locLookup$loc[apply(st_distance(yeid_lookup,temp_locLookup),1,which.min)] #Nearest location in locLookup
+
+temp_modDat <- left_join(temp_modDat,st_drop_geometry(yeid_lookup),by='YEID') %>% mutate(ID=paste(date_img,loc,sep='_'))  #Join in location index, create ID column
+
+temp_mapDat <- sDat2 %>% st_drop_geometry() %>% mutate(ID=paste(date_img,loc,sep='_')) %>% dplyr::select(ID,chlor_a:sst)
+
+bothDat <- temp_modDat %>% dplyr::select(chlor_a:sst,ID) %>% 
+  left_join(temp_mapDat,by='ID',suffix=c('.modDat','.mapDat')) %>% 
+  st_drop_geometry() %>% group_by(ID) %>% summarise(across(everything(),mean)) %>% ungroup() %>% 
+  pivot_longer(cols=-ID) %>% 
+  separate(col=name,into=c('variable','dataset'),sep='\\.') %>% arrange(ID,dataset,variable) %>% 
+  pivot_wider(names_from=dataset,id_cols=ID:variable,values_from=value) %>% 
+  na.omit()
+
+p1 <- bothDat %>% ggplot(aes(x=mapDat,y=modDat))+
+  geom_point()+
+  geom_abline(intercept=0,slope=1,linetype='dashed',col='red')+
+  facet_wrap(~variable,scales='free')+
+  labs(x='Mapping data (new)',y='Modeling data (original)')
+
+ggsave(p1,filename = './figures/compare_data.png',width=16,height=10)
