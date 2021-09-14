@@ -11,7 +11,7 @@ library(mgcv)
 library(parallel)
 source('helperFunctions.R')
 
-load('./data/all2014.Rdata')
+load('./data/all2014_2.Rdata')
 rm(bottomWDat,locIndex,sDat,surfWDat,wDat)
 
 storage <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata"
@@ -84,13 +84,12 @@ summary(sDat2)
 
 #Only observations
 obs <- sDat2 %>% dplyr::select(-doy:-y) %>% 
-  mutate(across(chlor_a:sst,log)) %>%  #Log-transform
-  as.matrix()
-# (obs[c(1),]-pca1$center)/pca1$scale %*% pca1$rotation #Works with a single row
+  as.matrix() %>% log() #Log-transform
 
 #Calculate PCs 1-6
-PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale) %*% pca1$rotation)[,1:6]
-colnames(PCs) <- paste0('PC',1:6)
+
+PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale)) %*% pca1$rotation
+PCs <- PCs[,1:6]
 sDat2 <- cbind(sDat2,PCs) #Combine PCs with sDat2
 # sDat2 %>% st_as_sf(coords=c("x","y")) %>% filter(doy==153) %>% ggplot()+geom_sf(aes(col=PC1))
 
@@ -176,7 +175,7 @@ load('./data/lagLinMod.Rdata')
 #Other solution that just uses "predict"
 
 #Days to average over
-dayLag <- 10
+dayLag <- 13
 d <- seq(min(sDat2$doy+dayLag),max(sDat2$doy+dayLag),by=7)
 dayLab <- format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 dayLab <- paste(dayLab[1:length(dayLab)-1],':',dayLab[2:length(dayLab)])
@@ -197,7 +196,7 @@ ggsave(p1,filename = './figures/mapLLpred2.png',width=14,height=8)
   
 #Get predictions from FR model ------------------------------
 
-# #Fit PC models
+##Fit PC models
 # library(parallel)
 # cl <- makeCluster(15)
 # #Takes about 10 minutes using 10 cores
@@ -218,9 +217,9 @@ load('./data/funRegMod.Rdata')
 
 # l <- 34405
 # d <- c(200,211)
-l <- sort(unique(locLookup$loc))
-d <- 200
-daylag <- 30
+l <- sort(unique(locLookup$loc)) #All unique locations
+d <- c(196,211) #Days 196,211
+daylag <- 30 #30-day lag
 
 cl <- makeCluster(15)
 a <- Sys.time() #~1.7 mins for all locations on a single day
@@ -236,28 +235,54 @@ Sys.time()-a
 stopCluster(cl)
 
 datList <- with(expand.grid(l=l,d=d),list(loc=l,doy=d))
-
 datList$dayMat <- outer(rep(1,length(datList$doy)),0:daylag)
 
 pcaMats <- lapply(paste0('PC',1:6),function(x){
-  newDF %>% dplyr::select(doy,loc,x) %>% 
-    mutate(doy=abs(doy-max(doy))) %>% 
-    arrange(doy,loc) %>% 
-    mutate(doy=paste0('d',doy)) %>% 
-    pivot_wider(values_from = x, names_from = doy) %>% 
-    column_to_rownames('loc') %>% as.matrix()
+  
+  #Works for a single day, but needs to work for multiple days
+  
+  x <- 'PC1'
+  temp <- newDF %>% dplyr::select(doy,loc,x) 
+  
+  datList$loc
+  newDF$loc
+  
+  datList$doy %in% temp$doy
+  
+  # #Old method
+  #   newDF %>% dplyr::select(doy,loc,x) %>% 
+  #   mutate(doy=abs(doy-max(doy))) %>% 
+  #   arrange(doy,loc) %>% 
+  #   mutate(doy=paste0('d',doy)) %>% 
+  #   pivot_wider(values_from = x, names_from = doy) %>% 
+  #   column_to_rownames('loc') %>% as.matrix()
 }) %>% set_names(paste0('pcaMat',1:6))
 
 datList <- c(datList,pcaMats)
 
-#Problem: predictions are way out of the range of actual data
+#Predictions are slightly out of the range of data
 locLookup %>% arrange(loc) %>% 
   mutate(predDO=predict(bWatMod,newdata=datList)) %>% 
-  # mutate(under=predDO<0,predDO=ifelse(under,NA,predDO)) %>% 
-  ggplot(aes(geometry=geometry))+
-  geom_sf(aes(col=predDO),size=0.1)+
-  labs(title='DO on Day 200')+
-  scale_colour_distiller(type='seq',palette='RdYlGn',direction=1)
+  mutate(predDO=cut(predDO,breaks=c(min(predDO,na.rm=TRUE),1,2,3,4,5,max(predDO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
+  ggplot()+
+  geom_sf(aes(geometry=geometry,col=predDO),size=0.2)+
+  scale_colour_brewer(type='seq',palette = 'RdBu')+
+  labs(title=paste0('Functional regression prediction on day ',d))+
+  guides(colour=guide_legend(override.aes = list(size=2)))
+
+# sDat2 %>% mutate(DO=predict(m1,.),doy=doy+dayLag,doy2=doy) %>% 
+#     mutate(doy=cut(doy,breaks=d,labels=dayLab,include.lowest=TRUE)) %>% 
+#     filter(!is.na(doy)) %>% 
+#     st_drop_geometry() %>% 
+#     group_by(doy,loc) %>% summarize(DO=min(DO,na.rm=TRUE)) %>% ungroup() %>% 
+#     mutate(DO=cut(DO,breaks=c(min(DO,na.rm=TRUE),1,2,3,4,5,max(DO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
+#     left_join(locLookup,by='loc') %>% 
+#     ggplot()+  geom_sf(aes(col=DO,geometry=geometry),alpha=0.6)+
+#     facet_wrap(~doy,ncol=2)+
+#     scale_colour_brewer(type='seq',palette = 'RdBu')+
+#     labs(title='Minimum 1-week lagged-linear predictions')
+
+
 
 ## Range of raw spectral vars for original model (sDat)
 

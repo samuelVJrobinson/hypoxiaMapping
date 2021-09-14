@@ -10,7 +10,6 @@ library(ggpubr)
 library(animation)
 library(mgcv)
 library(vegan)
-library(missMDA)
 library(gstat)
 
 setwd("~/Documents/hypoxiaMapping")
@@ -40,19 +39,25 @@ source('helperFunctions.R')
 # #Get locations from wDat to join onto spatial data
 # locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
 # 
-# #Set lowest positive number for spectral variables
-# lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09)
-# names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678')
-# 
 # #Spectral data
-# sDat <- read.csv('./data/sample_spectralData.csv') %>%
+# # path <- './data/sample_spectralData.csv' #Older dataset (March)
+# path <- './data/sample_spectralData2.csv' #Newer dataset (September)
+# 
+# sDat <- read.csv(path) %>%
 #   left_join(locIndex,by='YEID') %>% #Join in spatial info
 #   select(-Date,-doy) %>%
 #   st_as_sf() %>%
 #   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-#   mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) %>% #Set upper limit of nflh just below 1
+#   mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) #Set upper limit of nflh just below 1
+# 
+# #Set lowest positive number for spectral variables
+# # lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09) #Older values
+# lwrLimits <- apply(st_drop_geometry(sDat)[,3:16],2,function(x) min(x[x>0],na.rm=TRUE)) #Minimum nonzero values
+# names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
+# 
+# sDat <- sDat %>%
 #   #Rescales negative values be above 0.95*minimum positive value
-#   mutate(across(chlor_a:Rrs_678,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
+#   mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
 #   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
 #   mutate(propNA=numNA/max(numNA))
 # 
@@ -72,7 +77,7 @@ source('helperFunctions.R')
 # table(sDat$numNA)
 # 
 # #"Most missing" values is chlor_a. Rrs_ values are all missing together
-# apply(st_drop_geometry(sDat)[,3:16],2,function(x) sum(is.na(x)))/nrow(sDat)
+# apply(st_drop_geometry(select(sDat,chlor_a:sst)),2,function(x) sum(is.na(x)))/nrow(sDat)
 # 
 # #Looks like the missing values split into two clusters
 # hist(sDat$propNA,xlab='Proportion NA values')
@@ -98,6 +103,7 @@ source('helperFunctions.R')
 # # abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
 # # plot(log(pca$sdev),log(svdMat$d)) #Similar things
 # 
+# library(missMDA)
 # # n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes a minute or so
 # # plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
 # sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions
@@ -112,11 +118,11 @@ source('helperFunctions.R')
 #   ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
 #   labs(x='Principle Component',y='Cumulative Variance')+
 #   geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
-# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #97% of var in first 6 PCs
+# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #95% of var in first 6 PCs
 # ggsave('./figures/pcVar.png',p,width=5,height=5)
 # 
 # #Factor loadings of first 6 PCs
-# p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
+# (p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
 #   pivot_longer(PC1:PC6) %>%
 #   mutate(name=factor(name,labels=paste0('PC',1:6,': ',round(pca1$sdev[1:6]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
 #   mutate(var=factor(var,levels=rev(unique(var)))) %>%
@@ -124,31 +130,31 @@ source('helperFunctions.R')
 #   # geom_point(aes(y=var,x=value))+
 #   geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
 #   facet_wrap(~name)+
-#   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6')
+#   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6'))
 # ggsave('./figures/factorLoadings.png',p,width=10,height=5)
 # 
-# # #Make PC scores using center, scale, and rotation matrix
-# # sDatMat_imputed$completeObs[1,] #Input data
-# # pca1$x[1,] #PC scores (goal)
-# # pca1$sdev #sqrt-Eigenvalues
-# # pca1$rotation #Factor loadings
-# # pca1$center #Mean of original data
-# # pca1$scale #SD of original data
-# # 
-# # #Does this work?
-# # ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
-# # pca1$x[1,] #PCs from method
-# # (((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
+# #Make PC scores using center, scale, and rotation matrix
+# sDatMat_imputed$completeObs[1,] #Input data
+# pca1$x[1,] #PC scores (goal)
+# pca1$sdev #sqrt-Eigenvalues
+# pca1$rotation #Factor loadings
+# pca1$center #Mean of original data
+# pca1$scale #SD of original data
+# 
+# #Does this work?
+# ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
+# pca1$x[1,] #PCs from method
+# (((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
 # 
 # #Join imputed PCA values back to original dataset (NA if no data on that day)
 # sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
 # sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
 #   left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
-# rm(sDat_pca,sDatMat_imputed,sDatMat) #cleanup
-# save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014.Rdata')
+# rm(sDat_pca,sDatMat_imputed,sDatMat,p) #cleanup
+# save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014_2.Rdata')
 
 #Load data from saved file
-load('./data/all2014.Rdata')
+load('./data/all2014_2.Rdata')
 
 # Summary statistics of dataset -----------------------------
 
@@ -629,22 +635,22 @@ pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #
 # PCmod4 <-bam(PC4~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod5 <-bam(PC5~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # PCmod6 <-bam(PC6~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
-# a-Sys.time() #4.2 mins
+# Sys.time()-a #4.2 mins
 # save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods.RData')
 load('./data/PCmods.RData')
 
 par(mfrow=c(2,2)); 
 gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
 summary(PCmod1)
-gam.check(PCmod2); abline(0,1,col='red'); 
+gam.check(PCmod2); abline(0,1,col='red'); #Ehhhh...
 summary(PCmod2)
 gam.check(PCmod3); abline(0,1,col='red'); 
 summary(PCmod3)
-gam.check(PCmod4); abline(0,1,col='red'); #Bunch of lower outliers. Poor R2
+gam.check(PCmod4); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
 summary(PCmod4)
-gam.check(PCmod5); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
+gam.check(PCmod5); abline(0,1,col='red'); 
 summary(PCmod5)
-gam.check(PCmod6); abline(0,1,col='red'); # Cluster of high residuals. Poor R2
+gam.check(PCmod6); abline(0,1,col='red'); #t-dist again
 summary(PCmod6)
 par(mfrow=c(1,1))
 
@@ -659,15 +665,18 @@ summary(PCmod4) #Not as good
 summary(PCmod5) #Not as good
 summary(PCmod6) #Not as good
 
-#See how predictions look on spatial grid - takes a few minutes
+#See how predictions look on spatial grid 
+a <- Sys.time()
 predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
   separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>% 
   mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
   mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>% 
+  mutate(predPC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>%
+  mutate(predPC6=predict(PCmod6,newdata=.),sePC6=predict(PCmod6,newdata=.,se.fit=TRUE)$se.fit) %>% 
   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
+Sys.time()-a #8 mins
 
 #Predicted values
 p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>% 
@@ -688,7 +697,8 @@ p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>%
   theme(legend.position='bottom')
 
 #Residual plots
-p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),residPC4=resid(PCmod4),residPC5=resid(PCmod5)) %>% 
+p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),
+                       residPC4=resid(PCmod4),residPC5=resid(PCmod5),residPC6=resid(PCmod6)) %>% 
   pivot_longer(contains('residPC')) %>% mutate(name=gsub('residPC','PC',name)) %>% 
   mutate(date=dateCut(date_img,9)) %>% 
   ggplot()+geom_point(aes(x=sE,y=sN,col=value,alpha=abs(value),size=abs(value)))+
@@ -826,12 +836,16 @@ par(mfrow=c(2,2)); gam.check(bWatMod2); abline(0,1,col='red'); par(mfrow=c(1,1))
 plot(bWatMod2,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
+
+pvals <- unname(round(summary(bWatMod2)$s.table[,4],3))
+pvals <- ifelse(pvals==0,'<0.001',paste0('=',as.character(pvals)))
+
 p1 <- lapply(1:6,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
-  smoothPred(m=bWatMod2,dat=d,whichSmooth=i) 
-}) %>% set_names(paste0('PCA',1:6)) %>% bind_rows(.id='PC') %>% 
-  select(-contains('pcaMat')) %>% 
+  smoothPred(m=bWatMod2,dat=d,whichSmooth=i)}) %>% 
+  set_names(paste0('PCA',1:6,' (p',pvals,')')) %>% 
+  bind_rows(.id='PC') %>% select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+
   labs(x='Day (lag)',y='Effect')
