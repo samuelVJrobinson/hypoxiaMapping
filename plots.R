@@ -1,5 +1,7 @@
 
 
+### This script aims to combine sub-plots for Figure 2
+
 
 getwd()
 
@@ -7,19 +9,16 @@ library(tidyverse)
 library(dplyr)
 library(ggplot2)
 library(ggpubr)
-
+library(viridis)
+library(tidyquant)
 
 source('helperFunctions.R') ## mae() function
 
 
 
-### to combine sub-plots for Figure 2
 
 ## 1. load llModErr and fdaErr --------------------------------------------------------------------
 load(file = './data/errDat.Rdata')
-
-
-
 
 
 ## 2. load RF model error data --------------------------------------------------------------------
@@ -52,6 +51,7 @@ rfErr <- acc0 %>%
   dplyr::summarise(med = median(value, na.rm = T),
                    max = max(value, na.rm = T), 
                    min = min(value, na.rm = T), 
+                   med = mean(value, na.rm = T),
                    iqr=IQR(value, na.rm = T)) %>%
   dplyr::mutate(withinSampErr = NA)
   
@@ -67,14 +67,50 @@ names(fdaErr)
 names(llModErr)
 names(rfErr)
 
-err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'llr'),
-                     rfErr    %>% dplyr::mutate(mod = 'rf'))
+err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
+                     rfErr    %>% dplyr::mutate(mod = 'RFR')) %>%
+  dplyr::mutate(lag = -lag) %>%
+  ungroup() %>%
+  as.data.frame()
+
+err_2models_bestday <- err_2models %>% 
+  dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(best    = ifelse(errType != 'R2', min(med), max(med, na.rm = T)),
+                bestday = ifelse(med == best, lag, NA)) %>%
+  arrange(mod, errType, med) %>%
+  # dplyr::filter(!is.na(bestday)) %>%
+  as.data.frame()
 
 
-(p1 <- ggplot(err_2models, aes(x=lag,y=med))+
+
+err_2models_bestday21 <- err_2models %>% 
+  ungroup() %>%
+  dplyr::filter(errType != 'R2') %>%
+  dplyr::group_by(mod, errType) %>%
+  arrange(mod, errType, med) %>%
+  dplyr::slice(2) %>%
+  dplyr::mutate(bestday = lag) %>%
+  as.data.frame()
+
+err_2models_bestday22 <- err_2models %>% 
+  ungroup() %>%
+  dplyr::filter(errType == 'R2') %>%
+  dplyr::group_by(mod, errType) %>%
+  arrange(mod, errType, desc(med)) %>%
+  dplyr::slice(2) %>%
+  dplyr::mutate(bestday = lag) %>%
+  as.data.frame()
+
+err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
+
+(p1 <- ggplot(err_2models, aes(x=lag, y=med))+
     geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
-    geom_line()+
+    geom_line()+                  # aes(col = med), 
+    scale_color_viridis() + 
     geom_line(aes(y=withinSampErr),col='red')+
+    geom_vline(data = err_2models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+    # geom_vline(data = err_2models_bestday2, aes(xintercept = bestday), linetype = "dashed", color="green") + 
     facet_grid(errType~mod, scales = 'free_y')+
     labs(x='Time lag',y='Model Accuracy') +
     theme_bw()
@@ -83,8 +119,60 @@ err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'llr'),
 
 
 
-(p2 <- fdaErr %>% 
-  dplyr::mutate(mod = 'fda') %>% 
+### use the moving average value? ------------------------------------------------------------------
+err_2models_ma <- err_2models %>%
+  dplyr::group_by(mod, errType) %>%
+  dplyr::mutate(
+    med_ma = zoo::rollmean(med, k = 3, fill = 'extend')) %>% ## fill = NA
+  arrange(mod, errType, lag)
+
+err_2models_ma_bestday <- err_2models_ma %>% 
+  dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(best    = ifelse(errType != 'R2', min(med_ma), max(med_ma, na.rm = T)),
+                bestday = ifelse(med_ma == best, lag, NA)) %>%
+  dplyr::filter(!is.na(bestday))
+
+  
+  
+# (p1 <- ggplot(err_2models_ma, aes(x=lag, y=med))+
+#     geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+#     geom_line(size = 2)+                  # aes(col = med), 
+#     geom_line(aes(y = med_ma),col = 'red')+ # , col = med_ma
+#     scale_color_viridis() + 
+#     # geom_ma(ma_fun = SMA, n = 3) + # Plot 30-day SMA
+#     # geom_line(aes(y=withinSampErr),col='red')+
+#     geom_vline(data = err_2models_ma_bestday, 
+#                aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+#     facet_grid(errType~mod, scales = 'free_y')+
+#     labs(x='Time lag',y='Model Accuracy') +
+#     theme_bw()
+# )
+
+### --> not that good ......
+
+
+
+
+### to keep the y-axis at the same scale in all three plots, here we add the max and min value from p1 to p2. 
+fdaErr_si <- fdaErr %>%
+  group_by(name) %>%
+  dplyr::distinct(med)
+
+err_2models_MaxMin <- err_2models %>%
+  group_by(errType) %>%
+  dplyr::summarise(max = max(max, na.rm = T),
+                   min = min(min, na.rm = T)) %>%
+  gather(key = maxmin, value = value, max:min) %>%
+  dplyr::select(-maxmin) %>%
+  merge(., fdaErr_si, by.x = 'errType', by.y = 'name', all.x = T) %>%
+  dplyr::rename('name' = 'errType') %>% as.data.frame()
+
+fdaErr2 <- rbind(fdaErr %>% as.data.frame(), err_2models_MaxMin)
+
+
+(p2 <- fdaErr2 %>% 
+  dplyr::mutate(mod = 'FDA') %>% 
   ggplot(aes(x=value))+#geom_freqpoly()+
   geom_histogram(fill='black', alpha=0.3, binwidth = 0.02)+
   geom_vline(aes(xintercept=med),col='black')+
