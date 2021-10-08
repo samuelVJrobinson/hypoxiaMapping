@@ -9,7 +9,6 @@ library(ggpubr)
 library(animation)
 library(mgcv)
 library(vegan)
-library(missMDA)
 library(gstat)
 
 setwd("~/Documents/hypoxiaMapping")
@@ -17,7 +16,7 @@ setwd("~/Documents/hypoxiaMapping")
 source('helperFunctions.R')
 
 #Load data from saved file
-load('./data/all2014.Rdata')
+load('./data/all2014_2.Rdata')
 
 #GAM imputation ------------------------------------------
 
@@ -107,12 +106,12 @@ p3 <- data.frame(lag=lags,
 (p <- ggarrange(p1,p2,p3,ncol=1,common.legend=TRUE,legend='bottom') )
 ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
-#Similar to models using raw data: no global minimum appears, but local min at ~10 days
+#Similar to models using raw data: no global minimum appears, but local min at ~12 days
 
-which.min(sapply(modList1,function(i) mae(i$bottom))) #Minimum mae occurs about 10 days before
+(bestDay <- which.min(sapply(modList1,function(i) mae(i$bottom)))) #Minimum mae occurs about 12 days before
 which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs about 12 days before
 
-m1 <- modList1[[11]]$bottom #Save day 10
+m1 <- modList1[[bestDay]]$bottom #Save model from that day
 save(m1,file = './data/lagLinMod.Rdata')
 
 # Cross-validation (use 70%, predict on 30%)
@@ -169,7 +168,7 @@ fitLagModsCV <- function(i,dat=sDat,interaction=FALSE,use=0.7){
     ))
 }
 
-#Function to run this in parallel, return as a dataframe
+#Function to run this in parallel, return as a dataframe. (runs 1000 replications)
 cvPredErrs <- function(i,inter=FALSE){
   source('helperFunctions.R')
   lapply(replicate(n=1000,expr=fitLagModsCV(i,interaction = inter),simplify = FALSE),function(x){
@@ -178,23 +177,23 @@ cvPredErrs <- function(i,inter=FALSE){
   })
 }
 
-# # Get prediction errors for surface/bottom, using RMSE, MAE, and R2
-# library(parallel)
-# cluster <- makeCluster(15)
-# clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
-# cvPredList <- parLapply(cl=cluster,lags,cvPredErrs) #No interactions
-# cvPredList2 <- parLapply(cl=cluster,lags,cvPredErrs,inter=TRUE) #Interactions
-# stopCluster(cluster)
-# beepr::beep(1)
-# cvPredList <- lapply(cvPredList,function(x) do.call('rbind',x))
-# cvPredList2 <- lapply(cvPredList2,function(x) do.call('rbind',x))
-# 
-# cvPredList <- cvPredList %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
-#   mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Simple')
-# 
-# cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
-#   mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Interaction')
-# save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
+# Get prediction errors for surface/bottom, using RMSE, MAE, and R2
+library(parallel)
+cluster <- makeCluster(15)
+clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
+cvPredList <- parLapply(cl=cluster,lags,cvPredErrs) #No interactions
+cvPredList2 <- parLapply(cl=cluster,lags,cvPredErrs,inter=TRUE) #Interactions
+stopCluster(cluster)
+beepr::beep(1)
+cvPredList <- lapply(cvPredList,function(x) do.call('rbind',x))
+cvPredList2 <- lapply(cvPredList2,function(x) do.call('rbind',x))
+
+cvPredList <- cvPredList %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
+  mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Simple')
+
+cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
+  mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Interaction')
+save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
 
 load('./data/cvPredLists.Rdata')
 
@@ -254,18 +253,22 @@ bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2
                  s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
                  s(dayMat,by=pcaMat6,bs=basisType), 
                data=fdat) #Bottom water
-# save(bWatMod,file = './data/funRegMod.Rdata')
+save(bWatMod,file = './data/funRegMod.Rdata')
 
 summary(bWatMod) #R-squared of about 0.61
 par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
+pvals <- unname(round(summary(bWatMod)$s.table[,4],3))
+pvals <- ifelse(pvals==0,'<0.001',paste0('=',as.character(pvals)))
+
 p1 <- lapply(1:6,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
   smoothPred(m=bWatMod,dat=d,whichSmooth=i)}) %>% 
-  set_names(paste0('PCA',1:6)) %>% bind_rows(.id='PC') %>% 
+  set_names(paste0('PCA',1:6,' (p',pvals,')')) %>% 
+  bind_rows(.id='PC') %>% 
   select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+

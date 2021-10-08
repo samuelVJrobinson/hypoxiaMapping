@@ -18,7 +18,7 @@ setwd("~/Documents/hypoxiaMapping")
 source('helperFunctions.R')
 
 #Load data from saved file
-load('./data/all2014.Rdata')
+load('./data/all2014_2.Rdata')
 
 # Lagged linear model: PCA ----------------------------------------------------
 

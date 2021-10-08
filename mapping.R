@@ -11,7 +11,7 @@ library(mgcv)
 library(parallel)
 source('helperFunctions.R')
 
-load('./data/all2014.Rdata')
+load('./data/all2014_2.Rdata')
 rm(bottomWDat,locIndex,sDat,surfWDat,wDat)
 
 storage <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata"
@@ -84,13 +84,12 @@ summary(sDat2)
 
 #Only observations
 obs <- sDat2 %>% dplyr::select(-doy:-y) %>% 
-  mutate(across(chlor_a:sst,log)) %>%  #Log-transform
-  as.matrix()
-# (obs[c(1),]-pca1$center)/pca1$scale %*% pca1$rotation #Works with a single row
+  as.matrix() %>% log() #Log-transform
 
 #Calculate PCs 1-6
-PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale) %*% pca1$rotation)[,1:6]
-colnames(PCs) <- paste0('PC',1:6)
+
+PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale)) %*% pca1$rotation
+PCs <- PCs[,1:6]
 sDat2 <- cbind(sDat2,PCs) #Combine PCs with sDat2
 # sDat2 %>% st_as_sf(coords=c("x","y")) %>% filter(doy==153) %>% ggplot()+geom_sf(aes(col=PC1))
 
@@ -175,29 +174,40 @@ load('./data/lagLinMod.Rdata')
 
 #Other solution that just uses "predict"
 
-#Days to average over
-dayLag <- 10
-d <- seq(min(sDat2$doy+dayLag),max(sDat2$doy+dayLag),by=7)
+daylag <- 0 #Uses data from 0 days previous
+d <- c(182,189,196,203,211)
+l <- sort(unique(locLookup$loc)) #All unique locations
 dayLab <- format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
-dayLab <- paste(dayLab[1:length(dayLab)-1],':',dayLab[2:length(dayLab)])
 
-(p1 <- sDat2 %>% mutate(DO=predict(m1,.),doy=doy+dayLag,doy2=doy) %>% 
-  mutate(doy=cut(doy,breaks=d,labels=dayLab,include.lowest=TRUE)) %>% 
-  filter(!is.na(doy)) %>% 
-  st_drop_geometry() %>% 
-  group_by(doy,loc) %>% summarize(DO=min(DO,na.rm=TRUE)) %>% ungroup() %>% 
-  mutate(DO=cut(DO,breaks=c(min(DO,na.rm=TRUE),1,2,3,4,5,max(DO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
+newDF <- expand_grid(doy=d,loc=l) %>% #Days/locations to predict at
+  mutate(doy2=doy,doy=doy-daylag) %>% #Actual day = doy2, lagged day to get data from = doy
+  left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
+  left_join(st_drop_geometry(locLookup),by='loc')
+
+newDF1 <- newDF %>% filter(!is.na(PC1))  #DF with values
+newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
+
+cl <- makeCluster(15)
+newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
+  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
+stopCluster(cl)
+newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% dplyr::select(-sE,-sN) 
+rm(newDF1,newDF2) #Cleanup
+
+llMaps <- newDF %>% 
+  mutate(predDO=cut(predDO,breaks=c(min(predDO,na.rm=TRUE),1,2,3,4,5,max(predDO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
+  mutate(doy2=factor(doy,labels = dayLab)) %>% 
   left_join(locLookup,by='loc') %>% 
-  ggplot()+geom_sf(aes(col=DO,geometry=geometry),alpha=0.6)+
-  facet_wrap(~doy,ncol=2)+
+  ggplot()+
+    geom_sf(aes(col=predDO,geometry=geometry),size=0.2)+
+  facet_wrap(~doy2,ncol=1)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
-  labs(title='Minimum 1-week lagged-linear predictions'))
+  labs(title='Lagged-linear',col='DO (mg/L)')
 
-ggsave(p1,filename = './figures/mapLLpred2.png',width=14,height=8)
   
 #Get predictions from FR model ------------------------------
 
-# #Fit PC models
+##Fit PC models
 # library(parallel)
 # cl <- makeCluster(15)
 # #Takes about 10 minutes using 10 cores
@@ -216,90 +226,58 @@ load('./data/PCmods_mapping.RData')
 
 load('./data/funRegMod.Rdata')
 
-# l <- 34405
-# d <- c(200,211)
-l <- sort(unique(locLookup$loc))
-d <- 200
-daylag <- 30
 
-cl <- makeCluster(15)
-a <- Sys.time() #~1.7 mins for all locations on a single day
+#Possible prediction doy range | lag = days 182 - 211 (Jul 1 - 30)
+
+# "July 01" "July 08" "July 15" "July 22" "July 30"
+d <- c(182,189,196,203,211)
+# format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
+l <- sort(unique(locLookup$loc)) #All unique locations
+daylag <- 30 #30-day lag
+
+#Dataframe of values to choose from
 newDF <- expand_grid(doy=unique(do.call('c',lapply(d,function(x) x-(daylag:0)))),loc=l) %>% 
   left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
   left_join(st_drop_geometry(locLookup),by='loc')
-newDF <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF) %>% 
-  set_names(paste0('predPC',1:6)) %>% bind_cols() %>% bind_cols(newDF,.) %>% 
-  mutate(PC1=ifelse(is.na(PC1),predPC1,PC1),PC2=ifelse(is.na(PC2),predPC2,PC2),PC3=ifelse(is.na(PC3),predPC3,PC3)) %>%
-  mutate(PC4=ifelse(is.na(PC4),predPC4,PC4),PC5=ifelse(is.na(PC5),predPC5,PC5),PC6=ifelse(is.na(PC6),predPC6,PC6)) 
-  # dplyr::select(-contains('pred'),-contains('s'))
+newDF1 <- newDF %>% filter(!is.na(PC1))  #DF with values
+newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
+cl <- makeCluster(15)
+a <- Sys.time() #Takes about 2 mins for all 1.1 mil points
+newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
+  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
 Sys.time()-a
 stopCluster(cl)
+newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy)
+rm(newDF1,newDF2) #Cleanup
 
+#Make list of matrices
 datList <- with(expand.grid(l=l,d=d),list(loc=l,doy=d))
-
 datList$dayMat <- outer(rep(1,length(datList$doy)),0:daylag)
 
-pcaMats <- lapply(paste0('PC',1:6),function(x){
-  newDF %>% dplyr::select(doy,loc,x) %>% 
-    mutate(doy=abs(doy-max(doy))) %>% 
-    arrange(doy,loc) %>% 
-    mutate(doy=paste0('d',doy)) %>% 
-    pivot_wider(values_from = x, names_from = doy) %>% 
-    column_to_rownames('loc') %>% as.matrix()
+nd <- lapply(1:length(d),function(i){
+  chooseThese <- (newDF$doy %in% (d[i]-daylag):d[i]) & (newDF$loc %in% l)
+  newDF[chooseThese,] %>% data.frame()
+}) %>% bind_rows()
+
+pcaMats <- lapply(which(grepl('PC',names(nd))),function(j){
+  return(matrix(nd[,j],ncol=ncol(datList$dayMat),byrow=TRUE)[,ncol(datList$dayMat):1])
 }) %>% set_names(paste0('pcaMat',1:6))
 
-datList <- c(datList,pcaMats)
+datList <- c(datList,pcaMats)  
+ 
+#Predictions are slightly out of the range of data
+frMaps <- with(datList,data.frame(loc=loc,doy=doy,predDO=predict(bWatMod,newdata=datList))) %>% 
+  mutate(predDO=cut(predDO,breaks=c(min(predDO,na.rm=TRUE),1,2,3,4,5,max(predDO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
+  mutate(day=format(as.Date(paste0('2014-',doy),format='%Y-%j'),format='%B %d')) %>% 
+  left_join(locLookup,by='loc') %>% 
+  ggplot()+
+  geom_sf(aes(geometry=geometry,col=predDO),size=0.2)+
+  facet_wrap(~day,ncol=1)+
+  scale_colour_brewer(type='seq',palette = 'RdBu')+
+  labs(title='Functional regression',col='DO (mg/L)')+
+  guides(colour=guide_legend(override.aes = list(size=2)))
 
-#Problem: predictions are way out of the range of actual data
-locLookup %>% arrange(loc) %>% 
-  mutate(predDO=predict(bWatMod,newdata=datList)) %>% 
-  # mutate(under=predDO<0,predDO=ifelse(under,NA,predDO)) %>% 
-  ggplot(aes(geometry=geometry))+
-  geom_sf(aes(col=predDO),size=0.1)+
-  labs(title='DO on Day 200')+
-  scale_colour_distiller(type='seq',palette='RdYlGn',direction=1)
+library(ggpubr)
+p <- ggarrange(llMaps,frMaps,ncol=2,common.legend = TRUE,legend='bottom')
 
-## Range of raw spectral vars for original model (sDat)
-
-## sDat %>% dplyr::select(chlor_a:sst) %>% st_drop_geometry() %>% as.list() %>% sapply(.,range,na.rm=TRUE)
-#         chlor_a    nflh      poc    Rrs_412    Rrs_443      Rrs_469     Rrs_488     Rrs_531     Rrs_547     Rrs_555   Rrs_645    Rrs_667    Rrs_678    sst
-# [1,]  0.1026964 0.00001    31.16 9.5000e-10 9.5000e-10 1.710095e-05 0.000452001 0.000770001 0.000822001 0.000566001 9.500e-10 9.5000e-10 9.5000e-10 12.645
-# [2,] 98.1391449 0.99999 12953.40 1.1678e-02 1.3172e-02 1.628600e-02 0.018146001 0.019711001 0.021056001 0.020276001 1.681e-02 1.5234e-02 1.4894e-02 34.385
-
-#Range for mapping model raw vars
-#          chlor_a         nflh     poc    Rrs_412    Rrs_443    Rrs_469     Rrs_488     Rrs_531     Rrs_547     Rrs_555    Rrs_645    Rrs_667    Rrs_678    sst
-# [1,]  0.02460281 7.499941e-06    15.0 9.5000e-10 9.5000e-10 1.0000e-09 0.000150001 0.000512001 0.000802001 0.000336001 9.5000e-10 9.5000e-10 9.5000e-10 23.430
-# [2,] 99.07888031 1.207985e+00 12953.4 2.1314e-02 1.6558e-02 1.9234e-02 0.020298000 0.024560001 0.025778001 0.024768000 2.0126e-02 1.8378e-02 1.7658e-02 35.615
-
-# nflh >1 and sst higher for mapping vars. nflh can be rescaled, but unclear why sst is higher in larger dataset
-
-## Original Vars
-# #After log-transformation
-# #apply(sDatMat,2,range,na.rm=TRUE)
-#        chlor_a          nflh      poc    Rrs_412    Rrs_443    Rrs_469   Rrs_488   Rrs_531   Rrs_547   Rrs_555    Rrs_645    Rrs_667    Rrs_678      sst
-# [1,] -2.275978 -11.51293     3.439135 -20.774559 -20.774559 -10.976377 -7.701826 -7.169119 -7.103769 -7.476915 -20.774559 -20.774559 -20.774559 2.583998
-# [2,]  4.586386 -1.000005e-05 9.469114  -4.450048  -4.329662  -4.117449 -4.009305 -3.926578 -3.860570 -3.898317  -4.085781  -4.184225  -4.206797 3.537620
-
-# Mapping vars
-# After log-transformation
-# apply(obs,2,range)
-#        chlor_a          nflh      poc    Rrs_412    Rrs_443    Rrs_469   Rrs_488   Rrs_531   Rrs_547   Rrs_555    Rrs_645    Rrs_667    Rrs_678      sst
-# [1,] -3.704894 -11.51293     2.708050 -20.774559 -20.774559 -13.121864 -8.166533 -7.293416 -7.128401 -7.794485 -20.774559 -20.774559 -20.774559 3.158382
-# [2,]  4.595916 -1.000005e-05 9.469114  -3.848391  -4.100886  -4.075248 -3.947961 -3.754165 -3.695542 -3.700871  -3.905743  -3.996601  -4.036566 3.572767
-
-## Range of predictor PCs from original FR model (bWatMod)
-#           PCA1      PCA2     PCA3      PCA4      PCA5      PCA6
-# [1,] -5.951780 -5.278781 -4.41731 -6.213804 -4.474055 -2.894709
-# [2,]  9.661089 10.172015  3.28938  2.703307  6.635784  5.546856
-
-## Range of predictors PCs from updated models
-## sDat2 %>% st_drop_geometry() %>% dplyr::select(PC1:PC6) %>% as.list() %>% sapply(.,range)
-#             PC1       PC2       PC3       PC4        PC5       PC6
-# [1,] -0.8211135 -3.103531 -1.599118 -4.384769 -60.526401 -1.172665
-# [2,]  0.8562502 10.201641  2.135778  1.345465   8.086439  5.106161
-
-# PC1 = range too small
-# PC5 = range too large
-
-
-#
+ggsave(p,filename = './figures/mapBothPred.png',width=14,height=8)
