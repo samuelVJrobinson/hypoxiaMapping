@@ -1,10 +1,13 @@
-Model,Data type,RMSE,MAE,R2,Residual DF,Notes
-Lagged Linear PCA no Interaction,Smoothed,1.424635,1.118092,0.4117999,199,7-day lag
-Lagged Linear PCA with Interaction,Smoothed,1.116048,0.8771623,0.5847683,173,0-day lag
-Functional Linear PCA,Smoothed,1.234206,0.9160619,0.5371752,189.81,
-Lagged Linear PCA no Interaction,Raw,0.6489842,0.5622283,0.7747977,23,11-day lag
-Lagged Linear PCA with Interaction,Raw,0.2549736,0.1864932,0.9855013,6,13-day lag
-Functional Linear PCA,Raw,NA,NA,NA,NA,Not possible: too few days without data gaps
-Lagged Linear PCA no Interaction,Gap-filled,1.491959,1.203161,0.3707045,199,30-day lag
-Lagged Linear PCA with Interaction,Gap-filled,1.288742,0.9989468,0.5304596,173,29-day lag
-Functional Linear PCA,Gap-filled,1.296109,1.01964,0.4808095,186.61,
+Model,Error type,Data type,RMSE,MAE,R2,Residual DF,Notes
+Lagged Linear PCA no Interaction,Training (within-sample),Smoothed,1.478834,1.180653,0.3846508,198,7-day lag
+Lagged Linear PCA with Interaction,Training (within-sample),Smoothed,1.124149,0.8542359,0.6444254,172,0-day lag
+Functional Linear PCA,Training (within-sample),Smoothed,1.234206,0.9161689,0.5586434,185.8769,
+Lagged Linear PCA no Interaction,Training (within-sample),Raw,0.7057437,0.5949337,0.7297565,24,11-day lag
+Lagged Linear PCA with Interaction,Training (within-sample),Raw,0.3142684,0.1919677,0.9779264,7,13-day lag
+Functional Linear PCA,Training (within-sample),Raw,NA,NA,NA,NA,Not possible: too few days without data gaps
+Lagged Linear PCA no Interaction,Training (within-sample),Gap-filled,1.443553,1.14142,0.4136613,197,12-day lag
+Lagged Linear PCA with Interaction,Training (within-sample),Gap-filled,1.215682,0.9267693,0.5841634,172,0-day lag
+Functional Linear PCA,Training (within-sample),Gap-filled,1.184618,0.9199085,0.5465786,176.7801,
+Lagged Linear PCA no Interaction,Test (out-of-sample),Gap-filled,1.56583,1.230413,0.33353981,NA,0-day lag
+Lagged Linear PCA with Interaction,Test (out-of-sample),Gap-filled,6.341016,2.314943,0.09018224,NA,27-day lag
+Functional Linear PCA,Test (out-of-sample),Gap-filled,1.55,1.24,0.37,NA,

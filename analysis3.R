@@ -107,9 +107,12 @@ p3 <- data.frame(lag=lags,
 ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
 #Similar to models using raw data: no global minimum appears, but local min at ~12 days
-
+#Simple model
 (bestDay <- which.min(sapply(modList1,function(i) mae(i$bottom)))) #Minimum mae occurs about 12 days before
 which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs about 12 days before
+#Interaction model
+(bestDay <- which.min(sapply(modList2,function(i) mae(i$bottom)))) #Minimum mae occurs at 1 day
+which.min(sapply(modList2,function(i) rmse(i$bottom))) 
 
 m1 <- modList1[[bestDay]]$bottom #Save model from that day
 save(m1,file = './data/lagLinMod.Rdata')
@@ -178,22 +181,22 @@ cvPredErrs <- function(i,inter=FALSE){
 }
 
 # Get prediction errors for surface/bottom, using RMSE, MAE, and R2
-library(parallel)
-cluster <- makeCluster(15)
-clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
-cvPredList <- parLapply(cl=cluster,lags,cvPredErrs) #No interactions
-cvPredList2 <- parLapply(cl=cluster,lags,cvPredErrs,inter=TRUE) #Interactions
-stopCluster(cluster)
-beepr::beep(1)
-cvPredList <- lapply(cvPredList,function(x) do.call('rbind',x))
-cvPredList2 <- lapply(cvPredList2,function(x) do.call('rbind',x))
-
-cvPredList <- cvPredList %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
-  mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Simple')
-
-cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
-  mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Interaction')
-save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
+# library(parallel) #Takes about 10-15 mins
+# cluster <- makeCluster(15)
+# clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
+# cvPredList <- parLapply(cl=cluster,lags,cvPredErrs) #No interactions
+# cvPredList2 <- parLapply(cl=cluster,lags,cvPredErrs,inter=TRUE) #Interactions
+# stopCluster(cluster)
+# beepr::beep(1)
+# cvPredList <- lapply(cvPredList,function(x) do.call('rbind',x))
+# cvPredList2 <- lapply(cvPredList2,function(x) do.call('rbind',x))
+# 
+# cvPredList <- cvPredList %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
+#   mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Simple')
+# 
+# cvPredList2 <- cvPredList2 %>% bind_rows(.id='lag') %>% mutate(lag=as.numeric(lag)) %>% pivot_longer(-lag) %>%
+#   mutate(errType=factor(name,labels=c('MAE','R2','RMSE'))) %>% select(-name) %>% mutate(modType='Interaction')
+# save(cvPredList,cvPredList2,file='./data/cvPredLists.Rdata')
 
 load('./data/cvPredLists.Rdata')
 
@@ -211,12 +214,16 @@ cvPredList %>% filter(errType!='R2') %>%
   geom_line()+facet_wrap(~errType,ncol=1,scales='free_y')+
   labs(x='Time lag',y='Out-of-Sample Error',title='Bottom DO - Lagged linear Model')
 
-cvPredList %>% filter(errType!='R2') %>% 
-  group_by(lag,errType) %>% 
-  summarize(med=median(value),iqr=IQR(value)) %>% ungroup() %>% 
-  pivot_wider(names_from=errType,values_from = c(med,iqr)) %>% 
-  mutate(minMAE=med_MAE==min(med_MAE),minRMSE=med_RMSE==min(med_RMSE)) %>% 
-  filter(minMAE|minRMSE) %>% data.frame()
+bind_rows(cvPredList,cvPredList2) %>% 
+  group_by(lag,errType,modType) %>% 
+  summarize(med=mean(value)) %>% ungroup() %>% 
+  pivot_wider(names_from=errType,values_from = c(med)) %>% 
+  group_by(modType) %>% 
+  mutate(minMAE=MAE==min(MAE),minRMSE=RMSE==min(RMSE)) %>% 
+  filter(minMAE|minRMSE) %>% select(-contains('min')) %>% 
+  data.frame() %>% 
+  relocate(lag,modType,RMSE,MAE,R2) 
+  
 
 # Fit FR model of DO to gap-filled PCs ------------------------------------
 
@@ -258,6 +265,85 @@ save(bWatMod,file = './data/funRegMod.Rdata')
 summary(bWatMod) #R-squared of about 0.61
 par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod,scheme=1,pages=1)
+
+
+#What is the shortest lag time that we could use and get similar results?
+
+# #Fit FDA models with different lags (10 days - 30 days)
+# lags <- 10:30
+# 
+# #Function to get error from model of lagged data. default = within-sample, 0<test<1 = out of sample
+# getLagErr <- function(l,f,test=0,N=30){
+#   f$dayMat <- f$dayMat[,1:l]
+#   f$pcaMat1 <- f$pcaMat1[,1:l]
+#   f$pcaMat2 <- f$pcaMat2[,1:l]
+#   f$pcaMat3 <- f$pcaMat3[,1:l]
+#   f$pcaMat4 <- f$pcaMat4[,1:l]
+#   f$pcaMat5 <- f$pcaMat5[,1:l]
+#   f$pcaMat6 <- f$pcaMat6[,1:l]
+#   
+#   basisType <- 'cr' #Cubic regression splines
+#   
+#   if(test==0){
+#     #Fit FDA models 
+#     b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
+#                s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
+#                s(dayMat,by=pcaMat6,bs=basisType), 
+#              data=f) 
+#     
+#     ret <- c(rmse(b),mae(b),summary(b)$r.sq)
+#     names(ret) <- c('RMSE','MAE','R2')
+#     return(ret)
+#   } else {
+#     
+#     t(replicate(N,{
+#       #Get testing/training data indices
+#       ndat <- length(f$DO_bottom)
+#       testThese <- sort(sample(1:ndat,round(test*ndat)))
+#       trainThese <- (1:ndat)[!(1:ndat %in% sample(1:ndat,round(test*ndat)))]
+#       
+#       selectDat <- function(x,i){
+#         if(class(x)=='numeric') x <- x[i] else x <- x[i,]
+#       }
+#       
+#       testdat <- lapply(f,selectDat,i=testThese)
+#       traindat <- lapply(f,selectDat,i=trainThese)
+#       
+#       #Fit model
+#       b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
+#                  s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
+#                  s(dayMat,by=pcaMat6,bs=basisType), 
+#                data=traindat) 
+#       
+#       #Get difference between predicted/actual from test data
+#       res <- testdat$DO_bottom-predict(b,newdata=testdat)
+#       ret <- c(rmse(res),mae(res))
+#       names(ret) <- c('RMSE','MAE')
+#       return(ret)
+#     }))
+#   }
+#   
+# }
+# 
+# bWatModList <- lapply(lags,getLagErr,f=fdat) #Training data (within-sample) error
+# 
+# bWatModList %>% bind_rows() %>% mutate(lag=lags) %>% 
+#   pivot_longer(RMSE:R2) %>% 
+#   ggplot(aes(x=lag,y=value))+geom_point()+geom_line()+
+#   facet_wrap(~name,ncol=1,scales='free_y')
+# 
+# bWatModList <- lapply(lags,getLagErr,f=fdat,test=0.3,N=30) #Testing data (out of sample) error - takes a few mins
+# 
+# bWatModList %>% lapply(.,data.frame) %>% set_names(nm=as.character(lags)) %>% 
+#   bind_rows(.id = 'maxlag') %>% 
+#   mutate(maxlag=as.numeric(maxlag)) %>% 
+#   pivot_longer(RMSE:MAE) %>%
+#   group_by(maxlag,name) %>% summarize(med=median(value),upr=quantile(value,0.9),lwr=quantile(value,0.1)) %>% 
+#   ggplot(aes(x=maxlag,y=med))+geom_pointrange(aes(ymax=upr,ymin=lwr))+
+#   geom_line()+
+#   facet_wrap(~name,ncol=1,scales='free_y')
+# 
+# #Data from 30 days previous is better, but not a huge amount better than, data from a 10-day span
 
 #Use smoothPred to get FR plots from each smoother
 pvals <- unname(round(summary(bWatMod)$s.table[,4],3))
@@ -322,22 +408,22 @@ cvPredList3 <- parLapply(cl=cluster,1:1000,fitFRmodCV)  #Takes only a few second
 stopCluster(cluster)
 
 pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% group_by(name) %>% 
-  summarize(med=median(value),max=max(value),min=min(value),iqr=IQR(value))
+  summarize(mean=mean(value),med=median(value),max=max(value),min=min(value),iqr=IQR(value))
 
 #Compare within-sample performance of models --------------------------
 
 #RMSE
 min(sapply(modList1,function(i) rmse(i$bottom))) #Lagged linear regression - PCA
-# min(sapply(modList2,function(i) rmse(i$bottom))) #Lagged linear regression - PCA with interactions
+min(sapply(modList2,function(i) rmse(i$bottom))) #Lagged linear regression - PCA with interactions
 rmse(bWatMod) #Functional regression - PCA
 
 #Which days do these occur on?
-lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #7-day lag
-# lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #0-day lag
+lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #12-day lag
+lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #0-day lag
 
 #MAE
 min(sapply(modList1,function(i) mae(i$bottom))) #Lagged linear regression - PCA
-# min(sapply(modList2,function(i) mae(i$bottom))) #Lagged linear regression - PCA with interactions
+min(sapply(modList2,function(i) mae(i$bottom))) #Lagged linear regression - PCA with interactions
 mae(bWatMod) #Functional regression - PCA
 
 #R2
