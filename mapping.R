@@ -176,16 +176,19 @@ load('./data/lagLinMod.Rdata')
 
 
 #Goal: min/mean predictions for all points on following day segments
-# July 1-7, 8-14, 15-21, 22-28, 29 -Aug 4, 5-11, 12-18,  19-24, 24-30.
-
+# July 1-7, 8-14, 15-21, 22-28, 29-Aug 4, 5-11, 12-18,  19-24, 24-30.
+# 182-189, 
 
 #START HERE
 daylag <- 0 #Uses data from 0 days previous
 d <- c(182:243)
 
-cbind(d,
-      sort(rep(1:7,length.out=length(d)))
-      )
+format(as.Date(paste0(d,'-2014'),format='%j-%Y'),format='%d-%b')
+
+
+data.frame(day=d, 
+           label=format(as.Date(paste0(d,'-2014'),format='%j-%Y'),format='%d-%b'),
+           segment=sort(rep(1:7,length.out=length(d))))
 
 format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 l <- sort(unique(locLookup$loc)) #All unique locations
