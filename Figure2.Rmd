@@ -1,8 +1,17 @@
+---
+title: "Figure2"
+author: "Yingjie"
+date: "10/7/2021"
+output: html_document
+---
 
 
-### This script aims to combine sub-plots for Figure 2
+  This script aims to combine sub-plots for Figure 2. 
 
 
+
+# Setup 
+```{r}
 getwd()
 
 library(tidyverse)
@@ -13,10 +22,15 @@ library(viridis)
 library(tidyquant)
 
 source('helperFunctions.R') ## mae() function
+```
 
 
 
+# Data
 
+  Load data from 3 models. 
+  
+```{r}
 ## 1. load llModErr and fdaErr --------------------------------------------------------------------
 load(file = './data/errDat.Rdata')
 
@@ -51,14 +65,10 @@ rfErr <- acc0 %>%
   dplyr::summarise(med = median(value, na.rm = T),
                    max = max(value, na.rm = T), 
                    min = min(value, na.rm = T), 
-                   med = mean(value, na.rm = T),
+                   avg = mean(value, na.rm = T),
                    iqr=IQR(value, na.rm = T)) %>%
   dplyr::mutate(withinSampErr = NA)
   
-
-
-
-
 
 
 ## 3. bind three data sets -------------------------------------------------------------------------
@@ -72,7 +82,20 @@ err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
   dplyr::mutate(lag = -lag) %>%
   ungroup() %>%
   as.data.frame()
+```
 
+
+
+# Plot
+
+## plot 1
+
+### median value
+
+  Tried `mean` value too, and it looks `mean` value is easier to identify the *best day*. 
+  
+```{r}
+### highlight the best day for prediction
 err_2models_bestday <- err_2models %>% 
   dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
   group_by(mod, errType) %>%
@@ -82,8 +105,7 @@ err_2models_bestday <- err_2models %>%
   # dplyr::filter(!is.na(bestday)) %>%
   as.data.frame()
 
-
-
+### the 2nd best day
 err_2models_bestday21 <- err_2models %>% 
   ungroup() %>%
   dplyr::filter(errType != 'R2') %>%
@@ -104,22 +126,28 @@ err_2models_bestday22 <- err_2models %>%
 
 err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
 
+
+### plot
 (p1 <- ggplot(err_2models, aes(x=lag, y=med))+
     geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
     geom_line()+                  # aes(col = med), 
     scale_color_viridis() + 
     geom_line(aes(y=withinSampErr),col='red')+
     geom_vline(data = err_2models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
-    # geom_vline(data = err_2models_bestday2, aes(xintercept = bestday), linetype = "dashed", color="green") + 
+    # geom_vline(data = err_2models_bestday2, aes(xintercept = bestday), linetype = "dashed", color="green") +  ## --> not good
     facet_grid(errType~mod, scales = 'free_y')+
     labs(x='Time lag',y='Model Accuracy') +
     theme_bw()
 )
+```
 
 
 
-
-### use the moving average value? ------------------------------------------------------------------
+### moving average of median
+  
+  The result is not good - give up this option. 
+  
+```{r}
 err_2models_ma <- err_2models %>%
   dplyr::group_by(mod, errType) %>%
   dplyr::mutate(
@@ -150,10 +178,13 @@ err_2models_ma_bestday <- err_2models_ma %>%
 # )
 
 ### --> not that good ......
+```
 
 
 
+## plot 2
 
+```{r}
 ### to keep the y-axis at the same scale in all three plots, here we add the max and min value from p1 to p2. 
 fdaErr_si <- fdaErr %>%
   group_by(name) %>%
@@ -183,7 +214,15 @@ fdaErr2 <- rbind(fdaErr %>% as.data.frame(), err_2models_MaxMin)
     labs(x='',y='Count') +
     theme_bw()
 )
+```
 
+
+
+## combine plot 1 and 2
+```{r}
 (p <- ggarrange(p1,p2,nrow=1, widths = c(2,1)))
 
 ggsave('./figures/outOfSamp_comparison_3models.png', p, width=8, height=4)
+
+```
+
