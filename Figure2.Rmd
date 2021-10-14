@@ -3,6 +3,8 @@ title: "Figure2"
 author: "Yingjie"
 date: "10/7/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 
