@@ -38,7 +38,7 @@ files <- data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
   mutate(combined=paste0(newfolder,'/',combined)) %>% 
   mutate(exists=file.exists(combined))
 
-# #Average between aqua and terra
+# #Create files of average between aqua and terra
 # a <- Sys.time()
 # for(i in 1:nrow(files)){
 #   if(!files$exists[i]){
@@ -51,8 +51,10 @@ files <- data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
 #     writeRaster(newDat,filename=files$combined[i],format='GTiff')
 #     rm(newDat)
 #     gc()
+#     print(paste0('Created file ',i,' of ',nrow(files)))
+#   } else {
+#     print(paste0('File ',i,' of ',nrow(files),' already exists'))
 #   }
-#   print(paste0('Finished file ',i,' of ',nrow(files)))
 # }
 # b <- Sys.time()
 # b-a #Takes about 10 mins
@@ -172,10 +174,23 @@ load('./data/lagLinMod.Rdata')
 #   scale_colour_brewer(type='seq',palette = 'RdBu'))
 # ggsave(p1,filename = './figures/mapLLpred.png',width=10,height=10)
 
-#Other solution that just uses "predict"
 
+#Goal: min/mean predictions for all points on following day segments
+# July 1-7, 8-14, 15-21, 22-28, 29-Aug 4, 5-11, 12-18,  19-24, 24-30.
+# 182-189, 
+
+#START HERE
 daylag <- 0 #Uses data from 0 days previous
-d <- c(182,189,196,203,211)
+d <- c(182:243)
+
+format(as.Date(paste0(d,'-2014'),format='%j-%Y'),format='%d-%b')
+
+
+data.frame(day=d, 
+           label=format(as.Date(paste0(d,'-2014'),format='%j-%Y'),format='%d-%b'),
+           segment=sort(rep(1:7,length.out=length(d))))
+
+format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 l <- sort(unique(locLookup$loc)) #All unique locations
 dayLab <- format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 
@@ -188,8 +203,10 @@ newDF1 <- newDF %>% filter(!is.na(PC1))  #DF with values
 newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
 
 cl <- makeCluster(15)
+a <- Sys.time()
 newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
   set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
+Sys.time()-a
 stopCluster(cl)
 newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% dplyr::select(-sE,-sN) 
 rm(newDF1,newDF2) #Cleanup
@@ -207,18 +224,24 @@ llMaps <- newDF %>%
   
 #Get predictions from FR model ------------------------------
 
-##Fit PC models
+# #Fit PC models
 # library(parallel)
 # cl <- makeCluster(15)
-# #Takes about 10 minutes using 10 cores
+# #Takes about 10 minutes using 15 cores
 # bFuns <- c('tp','tp'); kNum <- c(60,10); dNum <- c(2,1)
 # a <- Sys.time()
-# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl) 
 # PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
 # PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
 # PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
 # PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
 # PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# par(mfrow=c(2,2)); gam.check(PCmod1); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
+# par(mfrow=c(2,2)); gam.check(PCmod2); abline(0,1,col='red'); par(mfrow=c(1,1)) 
+# par(mfrow=c(2,2)); gam.check(PCmod3); abline(0,1,col='red'); par(mfrow=c(1,1)) 
+# par(mfrow=c(2,2)); gam.check(PCmod4); abline(0,1,col='red'); par(mfrow=c(1,1))
+# par(mfrow=c(2,2)); gam.check(PCmod5); abline(0,1,col='red'); par(mfrow=c(1,1))
+# par(mfrow=c(2,2)); gam.check(PCmod6); abline(0,1,col='red'); par(mfrow=c(1,1))
 # Sys.time()-a
 # stopCluster(cl)
 # save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
@@ -227,10 +250,14 @@ load('./data/PCmods_mapping.RData')
 load('./data/funRegMod.Rdata')
 
 
-#Possible prediction doy range | lag = days 182 - 211 (Jul 1 - 30)
+
+#Possible prediction doy range | lag = days 182 - 243 (Jul 1 - Aug 31)
+
+#Goal: 
+# July 1-7, 8-14, 15-21, 21-28, 29-Aug 4, 5-11, 12-18,  19-24, 24-30.
 
 # "July 01" "July 08" "July 15" "July 22" "July 30"
-d <- c(182,189,196,203,211)
+d <- c(182,189,196,203,211,243)
 # format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
 l <- sort(unique(locLookup$loc)) #All unique locations
 daylag <- 30 #30-day lag
@@ -244,7 +271,8 @@ newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF wi
 cl <- makeCluster(15)
 a <- Sys.time() #Takes about 2 mins for all 1.1 mil points
 newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
-  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
+  set_names(paste0('PC',1:6)) %>% bind_cols() %>% 
+  bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
 Sys.time()-a
 stopCluster(cl)
 newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy)
