@@ -18,25 +18,36 @@ storage <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata"
 newfolder <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata/combined"
 shpfileFolder <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/shapefiles"
 
-coastBuff <- st_read(paste0(shpfileFolder,"/region_coast250kmBuffer.shp")) #250 km buffer zone away from coast
-# st_read(paste0(shpfileFolder,"/region_rectangle.shp")) %>%
-# st_read(paste0(shpfileFolder,"/TWAP_rivers.shp")) %>%
-  # ggplot()+geom_sf()
+regionRect <- st_read(paste0(shpfileFolder,"/region_rectangle.shp"))
+
+coastBuff <- st_read(paste0(shpfileFolder,"/region_coast250kmBuffer.shp")) %>% st_geometry() #250 km buffer zone away from coast
+coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% #Actual coast
+  st_crop(regionRect) %>% #Crop to region
+  st_geometry()  #Drop other info
+dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
+dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
 
 
 #Get file paths
-files <- data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>% 
+files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>% 
   mutate(file=dir(storage,recursive=TRUE)) %>%
   filter(!grepl('combined',paths)) %>% 
-  mutate(file=gsub('.*\\/','',file)) %>% mutate(doy=as.numeric(gsub('\\.tif','',gsub('[AT]2014','',file)))) %>%
+  mutate(file=gsub('.*\\/','',file)) %>% 
+  mutate(doy=as.numeric(gsub('\\.tif','',gsub('[AT]2014','',file)))) %>%
   dplyr::select(-file) %>% 
   mutate(platform=ifelse(grepl('terr',paths),'terra','aqua')) %>% 
   mutate(doy=ifelse(platform=='terra',doy-1,doy)) %>% #Terra starts 1 day earlier
-  pivot_wider(names_from='platform',values_from = paths) %>%
+  mutate(date=format(as.Date(paste0(doy,' 2014'),format='%j %Y'),format='%b %d')) %>%
+  pivot_wider(names_from=platform,values_from = paths) %>%
   mutate(combined=gsub('\\/media.*\\/[AT]','',aqua)) %>% 
   mutate(combined=gsub('2014','2014_',combined)) %>% 
   mutate(combined=paste0(newfolder,'/',combined)) %>% 
-  mutate(exists=file.exists(combined))
+  mutate(exists=file.exists(combined)) 
+
+# #Fiddling around with dates
+# as.Date(paste0(files$doy,'-2014'),format='%j-%Y')
+# as.Date('91-2014',format='%j-%Y')
+# format(as.Date(c('May 1 2014', 'Oct 1 2014'),format='%b %d %Y'),format='%j')
 
 # #Create files of average between aqua and terra
 # a <- Sys.time()
@@ -57,7 +68,7 @@ files <- data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
 #   }
 # }
 # b <- Sys.time()
-# b-a #Takes about 10 mins
+# b-a #Takes about 6 mins for 30 images
 
 sDat <- lapply(files$combined,function(datPath){
   cNames <- names(brick(files$aqua[1])) #Channel names
@@ -92,23 +103,152 @@ obs <- sDat2 %>% dplyr::select(-doy:-y) %>%
 
 PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale)) %*% pca1$rotation
 PCs <- PCs[,1:6]
-sDat2 <- cbind(sDat2,PCs) #Combine PCs with sDat2
-# sDat2 %>% st_as_sf(coords=c("x","y")) %>% filter(doy==153) %>% ggplot()+geom_sf(aes(col=PC1))
+sDat2 <- cbind(sDat2,PCs) #Combine PCs with sDat2# 
 
 #Add coordinate system
 sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
-  geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% #Louisiana offshore
-  mutate(sE=(E-mean(unique(E)))/1000,sN=(N-mean(unique(N)))/1000) %>% #Center E/N and convert to km
+  geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
+
+Emean <- mean(unique(sDat2$E)); Nmean <- mean(unique(sDat2$N)) #Center values of E/N, used for scaling
+
+sDat2 <- sDat2 %>% 
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
   mutate(across(E:N,~round(.x))) %>% 
   st_transform(4326) %>% dplyr::select(-chlor_a:-sst) %>% unite(loc,E,N) %>% 
   mutate(loc=as.numeric(factor(loc)))
 
-withinBuff <- sDat2 %>% st_intersects(.,coastBuff) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
+withinBuff <- sDat2 %>% st_intersects(.,dataBoundary) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
 sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
 locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table for locations
 # ggplot(locLookup)+geom_sf()
 
 rm(obs,sDat,withinBuff); gc()
+
+# Fit PC models -----------------------------------
+
+# #Approach using thin-plate splines
+
+# library(parallel)
+# cl <- makeCluster(15)
+# #Takes about 10 minutes using 15 cores
+# bFuns <- c('tp','tp'); kNum <- c(60,10); dNum <- c(2,1)
+# a <- Sys.time()
+# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl) 
+# PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
+# par(mfrow=c(2,2)); gam.check(PCmod1); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
+# par(mfrow=c(2,2)); gam.check(PCmod2); abline(0,1,col='red'); par(mfrow=c(1,1)) 
+# par(mfrow=c(2,2)); gam.check(PCmod3); abline(0,1,col='red'); par(mfrow=c(1,1)) 
+# par(mfrow=c(2,2)); gam.check(PCmod4); abline(0,1,col='red'); par(mfrow=c(1,1))
+# par(mfrow=c(2,2)); gam.check(PCmod5); abline(0,1,col='red'); par(mfrow=c(1,1))
+# par(mfrow=c(2,2)); gam.check(PCmod6); abline(0,1,col='red'); par(mfrow=c(1,1))
+# Sys.time()-a
+# stopCluster(cl)
+# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
+
+
+#Approach using soap-film smoothers
+
+# dataBoundary %>% plot() #Boundary to use for sampling
+
+#Create sampling zones for knots - idea: many close to the coast, fewer further away
+zones <- lapply(c(30,90,150),function(d){
+  coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
+    st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>% 
+    mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>% 
+    st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%  
+    st_intersection(.,dataBoundary)   
+})
+
+zones[[length(zones)+1]] <- st_difference(dataBoundary,zones[[length(zones)+1-1]]) #Creates last zone
+for(i in (length(zones)-1):2){
+  zones[[i]] <- st_difference(zones[[i]],zones[[i-1]]) #Creates last zone
+}
+
+
+#Looks OK
+plot(zones[[1]],col=NA) #Looks OK
+plot(zones[[2]],add=TRUE,col='red')
+plot(zones[[3]],add=TRUE,col='blue')
+plot(zones[[4]],add=TRUE,col='green')
+plot(knotLocs,add=TRUE,pch=19)
+
+knotLocs <- mapply(function(z,N){
+  z %>% st_transform(3401) %>% st_sample(size=N,type='hexagonal') %>% st_transform(st_crs(z))
+},z=zones,N=c(50,50,20,10)) %>% 
+  do.call('c',.)
+
+#Strips out knots that are too close - ideally this would use some other kind of approach like simulated annealing to maximize distance between points while holding them within sampling bands
+minDist <- 10000 #10 km
+removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Should any knots be removed?
+while(any(removeKnot)){ 
+  knotLocs <- knotLocs[-which(removeKnot)[1],]
+  removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Checks if any points are closer than minDist
+}
+
+#I think this should work
+plot(dataBoundary); plot(knotLocs,add=TRUE,pch=19)
+
+
+#Trying smaller example
+tempDat <- sDat2 %>% filter(doy==211) %>% st_drop_geometry()
+
+#Get knot and boundary locations on same scale
+
+bound <- dataBoundary %>% st_transform(3401) %>%
+  st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
+bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
+
+# # This isn't working for some reason. Knots aren't outside of boundary, but it thinks they are. Trying something simpler
+# kts <- knotLocs %>% st_transform(3401) %>% 
+#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>% 
+#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
+
+with(bound[[1]],plot(sE,sN,type='l'))
+kts <- locator() #Click on map for knots
+names(kts) <- c('sE','sN')
+
+with(kts,inSide(bound,sE,sN)) #Check whether knots are inside boundary
+in.out(bnd=bound,x=do.call('cbind',kts))
+
+PCmod1 <- gam(PC1~s(sE,sN,bs='so',xt=list(bnd=bound)),
+              knots=kts,data=tempDat,method='REML')
+#This works. I think I need fewer knots
+
+# b <- gam(y~s(v,w,k=30,bs="so",xt=list(bnd=fsb,nmax=nmax)),knots=knots)
+
+
+# library(parallel)
+# 
+
+# 
+# cl <- makeCluster(15)
+# 
+# {a <- Sys.time()
+# PCmod1 <- bam(PC1~te(sN,sE,doy,
+#                      bs=c('sf','tp'),
+#                      xt=list(list(bnd=bnd,nmax=100),NULL),
+#                      k=c(100,10),d=c(2,1)),
+#               knots=kts,
+#               data=tempDat,cluster=cl)
+# Sys.time()-a}
+# stopCluster(cl)
+
+# ## notice NULL element in 'xt' list - to indicate no xt object for "cr" basis...
+# bk <- gam(y~ te(v,w,t,bs=c("sf","cr"),k=c(25,4),d=c(2,1),
+#                 xt=list(list(bnd=fsb,nmax=nmax),NULL))+
+#             te(v,w,t,bs=c("sw","cr"),k=c(25,4),d=c(2,1),
+#                xt=list(list(bnd=fsb,nmax=nmax),NULL)),knots=knots)
+
+
+load('./data/PCmods_mapping.RData')
+
 
 # Get predictions from lagged linear model --------------------
 
@@ -224,28 +364,7 @@ llMaps <- newDF %>%
   
 #Get predictions from FR model ------------------------------
 
-# #Fit PC models
-# library(parallel)
-# cl <- makeCluster(15)
-# #Takes about 10 minutes using 15 cores
-# bFuns <- c('tp','tp'); kNum <- c(60,10); dNum <- c(2,1)
-# a <- Sys.time()
-# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl) 
-# PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# par(mfrow=c(2,2)); gam.check(PCmod1); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
-# par(mfrow=c(2,2)); gam.check(PCmod2); abline(0,1,col='red'); par(mfrow=c(1,1)) 
-# par(mfrow=c(2,2)); gam.check(PCmod3); abline(0,1,col='red'); par(mfrow=c(1,1)) 
-# par(mfrow=c(2,2)); gam.check(PCmod4); abline(0,1,col='red'); par(mfrow=c(1,1))
-# par(mfrow=c(2,2)); gam.check(PCmod5); abline(0,1,col='red'); par(mfrow=c(1,1))
-# par(mfrow=c(2,2)); gam.check(PCmod6); abline(0,1,col='red'); par(mfrow=c(1,1))
-# Sys.time()-a
-# stopCluster(cl)
-# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
-load('./data/PCmods_mapping.RData')
+
 
 load('./data/funRegMod.Rdata')
 
