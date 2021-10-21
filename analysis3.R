@@ -457,7 +457,7 @@ llModWithin <- data.frame(lag=lags,MAE=sapply(modList1,function(i) mae(i$bottom)
   pivot_longer(cols=-lag,names_to='errType',values_to='withinSampErr')
 
 llModErr <- cvPredList %>% mutate(lag=lag-1) %>% group_by(lag,errType) %>% 
-  summarize(med=median(value),max=max(value),min=min(value),iqr=IQR(value)) %>% 
+  dplyr::summarize(med=median(value),max=max(value),min=min(value),iqr=IQR(value)) %>% 
   left_join(llModWithin,by=c('lag','errType'))
 
 p1 <- ggplot(llModErr,aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
