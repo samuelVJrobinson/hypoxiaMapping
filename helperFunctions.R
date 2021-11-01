@@ -29,6 +29,7 @@ dateCut <- function(d,b,include.lowest=TRUE){ #Cut date object d into b discrete
 #   epsgCode: should CRS be transformed (useful for lat/lon -> UTM)
 geom2cols <- function(d,x=lon,y=lat,removeGeom=TRUE,epsg=NA){
   require(sf); require(dplyr)
+  if(!('sf' %in% class(d))) stop('Data must be an sf object')
   if(is_grouped_df(d)){ #If data are grouped
     warning('Data are grouped. Will ungroup data before converting geometry column.')
     d <- ungroup(d)

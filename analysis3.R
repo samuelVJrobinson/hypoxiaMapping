@@ -111,7 +111,7 @@ ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 (bestDay <- which.min(sapply(modList1,function(i) mae(i$bottom)))) #Minimum mae occurs about 12 days before
 which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs about 12 days before
 #Interaction model
-(bestDay <- which.min(sapply(modList2,function(i) mae(i$bottom)))) #Minimum mae occurs at 1 day
+(bestDay <- which.min(sapply(modList2,function(i) mae(i$bottom)))) #Minimum mae occurs on day of (no lag)
 which.min(sapply(modList2,function(i) rmse(i$bottom))) 
 
 m1 <- modList1[[bestDay]]$bottom #Save model from that day

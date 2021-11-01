@@ -123,7 +123,7 @@ sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
 locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table for locations
 # ggplot(locLookup)+geom_sf()
 
-rm(obs,sDat,withinBuff); gc()
+rm(obs,withinBuff); gc()
 
 # Fit PC models -----------------------------------
 
@@ -435,7 +435,7 @@ load('./data/lagLinMod.Rdata')
 # ggsave(p1,filename = './figures/mapLLpred.png',width=10,height=10)
 
 
-#Goal: min/mean predictions for all points on following day segments
+#Get min/mean predictions for all points on following day segments
 
 dateRanges <- read.csv('./data/mappingDateRanges.csv') %>% 
   mutate(across(c(startDay,endDay), ~as.numeric(format(as.Date(paste0(.x,' 2014'),format='%B %d %Y'),format='%j')),.names='{.col}_doy'))
@@ -444,65 +444,71 @@ dateRanges <- with(dateRanges,data.frame(slice=rep(slice,nDays),doy=min(startDay
 
 d <- dateRanges$doy #All days
 l <- sort(unique(locLookup$loc)) #All unique locations
+daylag <- 12 #Use 12-day lag
 
 newDF <- expand_grid(doy=d,loc=l) %>% #Days/locations to predict at
-  mutate(doy2=doy,doy=doy-daylag) %>% #Actual day = doy2, lagged day to get data from = doy
+  mutate(doy2=doy,doy=doy-daylag) %>% #doy = lagged day to get DO predictions from, doy 2 = Actual day 
   left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
   left_join(st_drop_geometry(locLookup),by='loc')
 
 #Separates into 2 df, one with values and one with NAs (quicker predictions)
-newDF1 <- newDF %>% filter(!is.na(PC1))  #DF with values
+newDF1 <- newDF %>% filter(!is.na(PC1))%>% mutate(imputed=FALSE)  #DF with values
 newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
 cl <- makeCluster(15)
-a <- Sys.time() #Takes about 4 mins
+{a <- Sys.time() #Takes about 4 mins
 newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){ #Make predictions in NA spaces
   require(mgcv); predict.gam(x,newdata=N)
   },N=newDF2) %>% 
-  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
-Sys.time()-a
+  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN) %>% mutate(imputed=TRUE)
+Sys.time()-a}
 stopCluster(cl)
-newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% dplyr::select(-sE,-sN) 
-rm(newDF1,newDF2) #Cleanup
+newDF <- bind_rows(newDF1,newDF2) %>% 
+  arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% dplyr::select(-sE,-sN,-doy) %>% rename('doy'='doy2')
+# rm(newDF1,newDF2) #Cleanup
 
 #Data for maps
 mapDat <- newDF %>% 
   left_join(.,dateRanges,by='doy') %>% 
-  group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO)) %>% 
+  group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO),propImputed=sum(imputed)/n()) %>% 
   ungroup() %>% 
-  mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE))) %>% 
+  mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE),
+                .names='{.col}_factor')) %>% 
   mutate(slice=factor(slice,lab=dateLabs)) %>% 
-  left_join(.,locLookup,by='loc') 
+  left_join(locLookup,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
 
+#Save a copy for YingJie
+LLmapDat <- mapDat %>% 
+  relocate(slice,minDO,meanDO,minDO_factor,meanDO_factor,propImputed) %>% 
+  geom2cols()
+save(LLmapDat,file = './data/LLmapDat.Rdata')
+
+#Make figure
 p1 <- ggplot(mapDat)+
-  geom_sf(aes(col=minDO,geometry=geometry),size=0.2)+
+  geom_sf(aes(col=minDO_factor,geometry=geometry),size=0.2)+
   facet_wrap(~slice,ncol=3)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
   labs(title='Lagged-linear - min(DO)',col='DO (mg/L)')
 p2 <- ggplot(mapDat)+
-  geom_sf(aes(col=meanDO,geometry=geometry),size=0.2)+
+  geom_sf(aes(col=meanDO_factor,geometry=geometry),size=0.2)+
   facet_wrap(~slice,ncol=3)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
   labs(title='Lagged-linear - mean(DO)',col='DO (mg/L)')
+p <- ggarrange(p1,p2,ncol=1)
 
-ggarrange(p1,p2,ncol=1)
+ggsave(p,filename = './figures/mapLLpred.png',width=12,height=15)
+
 
   
-#Get predictions from FR model ------------------------------
-
-
+# Get predictions from FR model ------------------------------
 
 load('./data/funRegMod.Rdata')
 
+dateRanges <- read.csv('./data/mappingDateRanges.csv') %>% #Get dates to predict on
+  mutate(across(c(startDay,endDay), ~as.numeric(format(as.Date(paste0(.x,' 2014'),format='%B %d %Y'),format='%j')),.names='{.col}_doy'))
+dateLabs <- with(dateRanges,paste0(startDay,' - ',endDay)) #Labels for date ranges
+dateRanges <- with(dateRanges,data.frame(slice=rep(slice,nDays),doy=min(startDay_doy):max(endDay_doy)))
 
-
-#Possible prediction doy range | lag = days 182 - 243 (Jul 1 - Aug 31)
-
-#Goal: 
-# July 1-7, 8-14, 15-21, 21-28, 29-Aug 4, 5-11, 12-18,  19-24, 24-30.
-
-# "July 01" "July 08" "July 15" "July 22" "July 30"
-d <- c(182,189,196,203,211,243)
-# format(as.Date(paste0('2014-',d),format='%Y-%j'),format='%B %d')
+d <- dateRanges$doy #All days
 l <- sort(unique(locLookup$loc)) #All unique locations
 daylag <- 30 #30-day lag
 
@@ -510,14 +516,14 @@ daylag <- 30 #30-day lag
 newDF <- expand_grid(doy=unique(do.call('c',lapply(d,function(x) x-(daylag:0)))),loc=l) %>% 
   left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
   left_join(st_drop_geometry(locLookup),by='loc')
-newDF1 <- newDF %>% filter(!is.na(PC1))  #DF with values
+newDF1 <- newDF %>% filter(!is.na(PC1)) %>% mutate(imputed=FALSE)  #DF with values
 newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
 cl <- makeCluster(15)
-a <- Sys.time() #Takes about 2 mins for all 1.1 mil points
+{a <- Sys.time() #Takes about 4.6 mins for all 2.4 mil points
 newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
   set_names(paste0('PC',1:6)) %>% bind_cols() %>% 
-  bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN)
-Sys.time()-a
+  bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN) %>% mutate(imputed=TRUE)
+Sys.time()-a}; beep()
 stopCluster(cl)
 newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy)
 rm(newDF1,newDF2) #Cleanup
@@ -526,30 +532,98 @@ rm(newDF1,newDF2) #Cleanup
 datList <- with(expand.grid(l=l,d=d),list(loc=l,doy=d))
 datList$dayMat <- outer(rep(1,length(datList$doy)),0:daylag)
 
-nd <- lapply(1:length(d),function(i){
+#For each day, create dataframe of all locations and all lagged PC values - not super efficient but it works
+nd <- lapply(1:length(d),function(i){ #Takes about a minute
   chooseThese <- (newDF$doy %in% (d[i]-daylag):d[i]) & (newDF$loc %in% l)
   newDF[chooseThese,] %>% data.frame()
-}) %>% bind_rows()
+}) %>% bind_rows() 
 
 pcaMats <- lapply(which(grepl('PC',names(nd))),function(j){
   return(matrix(nd[,j],ncol=ncol(datList$dayMat),byrow=TRUE)[,ncol(datList$dayMat):1])
 }) %>% set_names(paste0('pcaMat',1:6))
 
-datList <- c(datList,pcaMats)  
- 
-#Predictions are slightly out of the range of data
-frMaps <- with(datList,data.frame(loc=loc,doy=doy,predDO=predict(bWatMod,newdata=datList))) %>% 
-  mutate(predDO=cut(predDO,breaks=c(min(predDO,na.rm=TRUE),1,2,3,4,5,max(predDO,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE)) %>%
-  mutate(day=format(as.Date(paste0('2014-',doy),format='%Y-%j'),format='%B %d')) %>% 
-  left_join(locLookup,by='loc') %>% 
-  ggplot()+
-  geom_sf(aes(geometry=geometry,col=predDO),size=0.2)+
-  facet_wrap(~day,ncol=1)+
+datList <- c(datList,pcaMats)
+datList$isImputed <- matrix(nd[,which(grepl('imputed',names(nd)))],ncol=ncol(datList$dayMat),byrow=TRUE) #Which values are imputed?
+
+
+{a <- Sys.time() #Takes 4.6 mins to generate predictions for each day/location
+  mapDat <- with(datList,data.frame(loc=loc,doy=doy,predDO=predict(bWatMod,newdata=datList))) 
+  Sys.time()-a}
+
+#Gets proportion of imputed data used in each prediction - START HERE
+# 
+# prI <- sapply(1:nrow(mapDat),function(i){ #Again, not very efficient but it works for now
+#   chooseThese <- (newDF$doy %in% (mapDat$doy[i]-daylag):mapDat$doy[i]) & (newDF$loc %in% mapDat$loc[i])
+#   sum(newDF$imputed[chooseThese])/sum(chooseThese)
+# })
+
+cl <- makeCluster(15)
+prI <- parSapply(cl=cl,X=1:nrow(mapDat),FUN=function(i,N,M,daylag){
+  chooseThese <- (N$doy %in% (M$doy[i]-daylag):M$doy[i]) & (N$loc %in% M$loc[i])
+  sum(N$imputed[chooseThese])/sum(chooseThese)
+  },N=newDF,M=mapDat,daylag=daylag) 
+stopCluster(cl)
+
+
+mapDat <- mapDat %>% 
+  left_join(.,dateRanges,by='doy') %>% 
+  group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO),propImputed=prI) %>% 
+  ungroup() %>% 
+  mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE),
+                .names='{.col}_factor')) %>% 
+  mutate(slice=factor(slice,lab=dateLabs)) %>% 
+  left_join(locLookup,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
+
+#Save data for Yingie
+FRmapDat <- mapDat %>% 
+  relocate(slice,minDO,meanDO,minDO_factor,meanDO_factor,propImputed) %>% 
+  mutate(propImputed=NA) %>% 
+  geom2cols()
+
+save(FRmapDat,file = './data/FRmapDat.Rdata')
+
+
+#Make figure
+
+p1 <- ggplot(mapDat)+
+  geom_sf(aes(col=minDO_factor,geometry=geometry),size=0.2)+
+  facet_wrap(~slice,ncol=3)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
-  labs(title='Functional regression',col='DO (mg/L)')+
-  guides(colour=guide_legend(override.aes = list(size=2)))
+  labs(title='Functional Regression - min(DO)',col='DO (mg/L)')
+p2 <- ggplot(mapDat)+
+  geom_sf(aes(col=meanDO_factor,geometry=geometry),size=0.2)+
+  facet_wrap(~slice,ncol=3)+
+  scale_colour_brewer(type='seq',palette = 'RdBu')+
+  labs(title='Functional Regression - mean(DO)',col='DO (mg/L)')
+p <- ggarrange(p1,p2,ncol=1)
+ggsave(p,filename = './figures/mapFRpred.png',width=12,height=15)
 
-library(ggpubr)
-p <- ggarrange(llMaps,frMaps,ncol=2,common.legend = TRUE,legend='bottom')
+# Convert predictions from dataframe to raster -----------------------------
 
-ggsave(p,filename = './figures/mapBothPred.png',width=14,height=8)
+library(sp)
+library(raster)
+
+#Get info needed for transforming points to rasters
+tempRaster <- brick("./data/2014_121.tif") #Read in first combined tif file
+tempRes <- res(tempRaster) #Resolution
+tempCRS <- crs(tempRaster) #CRS
+tempExtent <- extent(tempRaster) #Extent
+
+#Load in predictions dataframe
+load('./data/FRmapDat.Rdata') #This isn't located on the Git, so download from Google Drive first
+
+#Not sure what your workflow is, but say you only wanted a raster for the first slice:
+tempDF <- filter(FRmapDat,slice=='June 1 - June 10') #Choose only first slice
+tempCoords <- tempDF[,c('lon','lat')]
+tempDF <- tempDF %>% dplyr::select(minDO,meanDO) #Get rid of extra info
+
+tempDF <- SpatialPointsDataFrame(coords=tempCoords,data=tempDF,proj4string=tempCRS) #Convert to sp object
+
+exampleRaster <- raster(crs = tempCRS, vals = NA, resolution = tempRes, ext = tempExtent) %>%
+  rasterize(tempDF, .)
+
+plot(exampleRaster) #Works
+
+#Now that it's been converted, you can save it in whatever form you want using writeRaster()
+
+
