@@ -463,7 +463,8 @@ newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=
 Sys.time()-a}
 stopCluster(cl)
 newDF <- bind_rows(newDF1,newDF2) %>% 
-  arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% dplyr::select(-sE,-sN,-doy) %>% rename('doy'='doy2')
+  arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% 
+  dplyr::select(-sE,-sN,-doy) %>% rename('doy'='doy2')
 # rm(newDF1,newDF2) #Cleanup
 
 #Data for maps
@@ -482,6 +483,12 @@ LLmapDat <- mapDat %>%
   geom2cols()
 save(LLmapDat,file = './data/LLmapDat.Rdata')
 
+#Full copy for YingJie
+LLmapDatFull <- newDF %>% left_join(.,locLookup,by='loc') %>% 
+  dplyr::select(doy,imputed,predDO,geometry) %>% st_as_sf() %>% 
+  geom2cols()
+save(LLmapDatFull,file = './data/LLmapDatFull.Rdata')
+
 #Make figure
 p1 <- ggplot(mapDat)+
   geom_sf(aes(col=minDO_factor,geometry=geometry),size=0.2)+
@@ -497,8 +504,6 @@ p <- ggarrange(p1,p2,ncol=1)
 
 ggsave(p,filename = './figures/mapLLpred.png',width=12,height=15)
 
-
-  
 # Get predictions from FR model ------------------------------
 
 load('./data/funRegMod.Rdata')
@@ -545,29 +550,22 @@ pcaMats <- lapply(which(grepl('PC',names(nd))),function(j){
 datList <- c(datList,pcaMats)
 datList$isImputed <- matrix(nd[,which(grepl('imputed',names(nd)))],ncol=ncol(datList$dayMat),byrow=TRUE) #Which values are imputed?
 
-
 {a <- Sys.time() #Takes 4.6 mins to generate predictions for each day/location
   mapDat <- with(datList,data.frame(loc=loc,doy=doy,predDO=predict(bWatMod,newdata=datList))) 
   Sys.time()-a}
 
-#Gets proportion of imputed data used in each prediction - START HERE
-# 
-# prI <- sapply(1:nrow(mapDat),function(i){ #Again, not very efficient but it works for now
-#   chooseThese <- (newDF$doy %in% (mapDat$doy[i]-daylag):mapDat$doy[i]) & (newDF$loc %in% mapDat$loc[i])
-#   sum(newDF$imputed[chooseThese])/sum(chooseThese)
-# })
+#Gets proportion of imputed data used in each prediction
+mapDat$propImputed <- apply(datList$isImputed,1,mean)
 
-cl <- makeCluster(15)
-prI <- parSapply(cl=cl,X=1:nrow(mapDat),FUN=function(i,N,M,daylag){
-  chooseThese <- (N$doy %in% (M$doy[i]-daylag):M$doy[i]) & (N$loc %in% M$loc[i])
-  sum(N$imputed[chooseThese])/sum(chooseThese)
-  },N=newDF,M=mapDat,daylag=daylag) 
-stopCluster(cl)
-
+#Full copy for YingJie
+FRmapDatFull <- mapDat %>% left_join(.,locLookup,by='loc') %>% 
+  dplyr::select(doy,propImputed,predDO,geometry) %>% st_as_sf() %>% 
+  geom2cols()
+save(FRmapDatFull,file = './data/FRmapDatFull.Rdata')
 
 mapDat <- mapDat %>% 
   left_join(.,dateRanges,by='doy') %>% 
-  group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO),propImputed=prI) %>% 
+  group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO),propImputed=mean(propImputed)) %>% 
   ungroup() %>% 
   mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE),
                 .names='{.col}_factor')) %>% 
@@ -579,12 +577,9 @@ FRmapDat <- mapDat %>%
   relocate(slice,minDO,meanDO,minDO_factor,meanDO_factor,propImputed) %>% 
   mutate(propImputed=NA) %>% 
   geom2cols()
-
 save(FRmapDat,file = './data/FRmapDat.Rdata')
 
-
 #Make figure
-
 p1 <- ggplot(mapDat)+
   geom_sf(aes(col=minDO_factor,geometry=geometry),size=0.2)+
   facet_wrap(~slice,ncol=3)+
