@@ -269,84 +269,6 @@ par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) 
 plot(bWatMod,scheme=1,pages=1)
 
 
-#What is the shortest lag time that we could use for FR and get similar results?
-
-# #Fit FDA models with different lags (10 days - 30 days)
-# lags <- 10:30
-# 
-# #Function to get error from model of lagged data. default = within-sample, 0<test<1 = out of sample
-# getLagErr <- function(l,f,test=0,N=30){
-#   f$dayMat <- f$dayMat[,1:l]
-#   f$pcaMat1 <- f$pcaMat1[,1:l]
-#   f$pcaMat2 <- f$pcaMat2[,1:l]
-#   f$pcaMat3 <- f$pcaMat3[,1:l]
-#   f$pcaMat4 <- f$pcaMat4[,1:l]
-#   f$pcaMat5 <- f$pcaMat5[,1:l]
-#   f$pcaMat6 <- f$pcaMat6[,1:l]
-#   
-#   basisType <- 'cr' #Cubic regression splines
-#   
-#   if(test==0){
-#     #Fit FDA models 
-#     b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
-#                s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
-#                s(dayMat,by=pcaMat6,bs=basisType), 
-#              data=f) 
-#     
-#     ret <- c(rmse(b),mae(b),summary(b)$r.sq)
-#     names(ret) <- c('RMSE','MAE','R2')
-#     return(ret)
-#   } else {
-#     
-#     t(replicate(N,{
-#       #Get testing/training data indices
-#       ndat <- length(f$DO_bottom)
-#       testThese <- sort(sample(1:ndat,round(test*ndat)))
-#       trainThese <- (1:ndat)[!(1:ndat %in% sample(1:ndat,round(test*ndat)))]
-#       
-#       selectDat <- function(x,i){
-#         if(class(x)=='numeric') x <- x[i] else x <- x[i,]
-#       }
-#       
-#       testdat <- lapply(f,selectDat,i=testThese)
-#       traindat <- lapply(f,selectDat,i=trainThese)
-#       
-#       #Fit model
-#       b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
-#                  s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
-#                  s(dayMat,by=pcaMat6,bs=basisType), 
-#                data=traindat) 
-#       
-#       #Get difference between predicted/actual from test data
-#       res <- testdat$DO_bottom-predict(b,newdata=testdat)
-#       ret <- c(rmse(res),mae(res))
-#       names(ret) <- c('RMSE','MAE')
-#       return(ret)
-#     }))
-#   }
-#   
-# }
-# 
-# bWatModList <- lapply(lags,getLagErr,f=fdat) #Training data (within-sample) error
-# 
-# bWatModList %>% bind_rows() %>% mutate(lag=lags) %>% 
-#   pivot_longer(RMSE:R2) %>% 
-#   ggplot(aes(x=lag,y=value))+geom_point()+geom_line()+
-#   facet_wrap(~name,ncol=1,scales='free_y')
-# 
-# bWatModList <- lapply(lags,getLagErr,f=fdat,test=0.3,N=30) #Testing data (out of sample) error - takes a few mins
-# 
-# bWatModList %>% lapply(.,data.frame) %>% set_names(nm=as.character(lags)) %>% 
-#   bind_rows(.id = 'maxlag') %>% 
-#   mutate(maxlag=as.numeric(maxlag)) %>% 
-#   pivot_longer(RMSE:MAE) %>%
-#   group_by(maxlag,name) %>% summarize(med=median(value),upr=quantile(value,0.9),lwr=quantile(value,0.1)) %>% 
-#   ggplot(aes(x=maxlag,y=med))+geom_pointrange(aes(ymax=upr,ymin=lwr))+
-#   geom_line()+
-#   facet_wrap(~name,ncol=1,scales='free_y')
-# 
-# #Data from 30 days previous is better, but not a huge amount better than, data from a 10-day span
-
 #Use smoothPred to get FR plots from each smoother
 pvals <- unname(round(summary(bWatMod)$s.table[,4],3))
 pvals <- ifelse(pvals==0,'<0.001',paste0('=',as.character(pvals)))
@@ -412,6 +334,87 @@ stopCluster(cluster)
 pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% group_by(name) %>% 
   summarize(mean=mean(value),med=median(value),max=max(value),min=min(value),iqr=IQR(value))
 
+#What is the shortest lag time that we could use for FR and get similar results?
+
+#Fit FDA models with different lags (10 days - 30 days)
+lags <- 10:30
+
+#Function to get error from model of lagged data. default = within-sample, 0<test<1 = out of sample
+getLagErr <- function(l,f,test=0,N=30){
+  f$dayMat <- f$dayMat[,1:l]
+  f$pcaMat1 <- f$pcaMat1[,1:l]
+  f$pcaMat2 <- f$pcaMat2[,1:l]
+  f$pcaMat3 <- f$pcaMat3[,1:l]
+  f$pcaMat4 <- f$pcaMat4[,1:l]
+  f$pcaMat5 <- f$pcaMat5[,1:l]
+  f$pcaMat6 <- f$pcaMat6[,1:l]
+  
+  basisType <- 'cr' #Cubic regression splines
+  
+  if(test==0){
+    #Fit FDA models
+    b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
+               s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
+               s(dayMat,by=pcaMat6,bs=basisType),
+             data=f)
+    
+    ret <- c(rmse(b),mae(b),summary(b)$r.sq)
+    names(ret) <- c('RMSE','MAE','R2')
+    return(ret)
+  } else {
+    
+    t(replicate(N,{
+      #Get testing/training data indices
+      ndat <- length(f$DO_bottom)
+      testThese <- sort(sample(1:ndat,round(test*ndat)))
+      trainThese <- (1:ndat)[!(1:ndat %in% sample(1:ndat,round(test*ndat)))]
+      
+      selectDat <- function(x,i){
+        if(class(x)=='numeric') x <- x[i] else x <- x[i,]
+      }
+      
+      testdat <- lapply(f,selectDat,i=testThese)
+      traindat <- lapply(f,selectDat,i=trainThese)
+      
+      #Fit model
+      b <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
+                 s(dayMat,by=pcaMat3,bs=basisType)+s(dayMat,by=pcaMat4,bs=basisType)+s(dayMat,by=pcaMat5,bs=basisType)+
+                 s(dayMat,by=pcaMat6,bs=basisType),
+               data=traindat)
+      
+      #Get difference between predicted/actual from test data
+      res <- testdat$DO_bottom-predict(b,newdata=testdat)
+      ret <- c(rmse(res),mae(res),summary(b)$r.sq)
+      names(ret) <- c('RMSE','MAE','R2')
+      return(ret)
+    }))
+  }
+}
+
+bWatModList_train <- lapply(lags,getLagErr,f=fdat) %>% #Training data (within-sample) error
+  bind_rows() %>% mutate(lag=lags) %>%
+  pivot_longer(RMSE:R2) 
+
+bWatModList_test <- lapply(lags,getLagErr,f=fdat,test=0.3,N=100) #Testing data (out of sample) error - takes a few mins
+
+bWatModList_test <- bWatModList_test %>% lapply(.,data.frame) %>% set_names(nm=as.character(lags)) %>%
+  bind_rows(.id = 'lag') %>%
+  mutate(lag=as.numeric(lag)) %>%
+  pivot_longer(RMSE:R2) %>%
+  group_by(lag,name) %>% summarize(med=median(value),upr=quantile(value,0.9),lwr=quantile(value,0.1)) 
+
+fdaErr <- left_join(bWatModList_test,bWatModList_train,by=c('lag','name')) %>% 
+  rename('withinSampErr'='value')
+
+fdaErr %>% ggplot(aes(x=lag,y=med))+
+  geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
+  geom_line()+ #Testing
+  geom_line(aes(y=withinSampErr),col='red')+
+  facet_wrap(~name,ncol=1,scales='free_y')+
+  labs(x='Maximum lag days',y='Model Accuracy')  
+
+#Conclusion: Data from 30 days previous is better, but not a huge amount better than, data from a 10-day span
+
 #Compare within-sample performance of models --------------------------
 
 #RMSE
@@ -466,24 +469,31 @@ p1 <- ggplot(llModErr,aes(x=lag,y=med))+geom_ribbon(aes(ymax=max,ymin=min),alpha
   geom_line()+geom_line(aes(y=withinSampErr),col='red')+facet_wrap(~errType,ncol=1,scales='free_y')+
   labs(x='Time lag',y='Model Accuracy',title='Lagged linear Model')
 
-#Results from FDA model
-fdaWithin <- data.frame(MAE=mae(bWatMod),RMSE=rmse(mae(bWatMod)),R2=summary(bWatMod)$r.sq) %>% 
-  pivot_longer(cols=everything())
+# #Results from FDA model
 
-fdaErr <- pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% group_by(name) %>% mutate(med=median(value)) 
+# #Old method
+# fdaWithin <- data.frame(MAE=mae(bWatMod),RMSE=rmse(mae(bWatMod)),R2=summary(bWatMod)$r.sq) %>% 
+#   pivot_longer(cols=everything())
+# fdaErr <- pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% group_by(name) %>% mutate(med=median(value)) 
+# p2 <- fdaErr %>% 
+#   ggplot(aes(x=value))+#geom_freqpoly()+
+#   geom_histogram(fill='black',alpha=0.3,binwidth = 0.02)+
+#   geom_vline(aes(xintercept=med),col='black')+
+#   geom_vline(data=fdaWithin,aes(xintercept=value),col='red')+
+#   facet_wrap(~name,ncol=1,scales='free_y')+
+#   labs(x='Model Accuracy',title='Functional Data Analysis',y='Count')+
+#   coord_flip()
 
-p2 <- fdaErr %>% 
-  ggplot(aes(x=value))+#geom_freqpoly()+
-  geom_histogram(fill='black',alpha=0.3,binwidth = 0.02)+
-  geom_vline(aes(xintercept=med),col='black')+
-  geom_vline(data=fdaWithin,aes(xintercept=value),col='red')+
+p2 <- fdaErr %>% ggplot(aes(x=lag,y=med))+
+  geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
+  geom_line()+ #Testing
+  geom_line(aes(y=withinErr),col='red')+
   facet_wrap(~name,ncol=1,scales='free_y')+
-  labs(x='Model Accuracy',title='Functional Data Analysis',y='Count')+
-  coord_flip()
+  labs(x='Maximum lag days',y='Model Accuracy',title='Functional Data Analysis')  
 
 (p <- ggarrange(p1,p2,nrow=1))
 ggsave('./figures/outOfSamp_comparison.png',p,width=8,height=8)
 
-NOTE <- 'Data are fundamentally different from each other, so had to save as separate objects. llModErr = Out-of-sample and within-sample error for lagged linear models. fdaWithin = Within-sample error for FDA model. fdaErr = Out-of-sample error for 1000 random draws of FDA model.'
+NOTE <- 'Data are quite different from each other, so had to save as separate objects. llModErr = Out-of-sample and within-sample error for lagged linear models. fdaErr = Out-of-sample and within-sample error for 100 random draws of FDA model.'
 
-save(llModErr,fdaWithin,fdaErr,NOTE,file = './data/errDat.Rdata')
+save(llModErr,fdaErr,NOTE,file = './data/errDat.Rdata')
