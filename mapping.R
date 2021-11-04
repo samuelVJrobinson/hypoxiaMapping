@@ -263,7 +263,7 @@ rm(obs,withinBuff); gc()
 # plot(predict(PCmod1b),tempDat$PC1,main='Thin-plate'); abline(0,1,col='red')
 # par(mfrow=c(1,1))
 # 
-# #Model with tensor product smooth for days 
+# #Model with tensor product smooth for days
 # 
 # #Uses a subset of days: 201-221
 # tempDat <- sDat2 %>% filter(doy>=201,doy<=221) %>% st_drop_geometry()
@@ -307,8 +307,8 @@ rm(obs,withinBuff); gc()
 #   pivot_longer(cols=c(predSoap,predTP)) %>%
 #   ggplot()+geom_sf(aes(geometry=geometry,col=value))+
 #   facet_grid(doy~name)
-
-
+# 
+# 
 # #Full model fits
 # # Knots along lines of buffer distances
 # knotLocs <- mapply(function(d,N){
@@ -322,15 +322,15 @@ rm(obs,withinBuff); gc()
 #     st_line_sample(n = N,type='regular') %>% #Samples N points along line
 #     st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
 # },
-# d=c(50,150,225), #Distances 
+# d=c(50,150,225), #Distances
 # N=c(25,15,8) #Points within each distance
-# ) %>%  
+# ) %>%
 #   do.call('c',.)
 # 
 # #Looks OK
 # plot(dataBoundary)
 # plot(knotLocs,add=TRUE,pch=19,cex=0.5)
-# length(knotLocs)
+# length(knotLocs) #48 knots
 # 
 # #Get knot and boundary locations on same scale
 # bound <- dataBoundary %>% st_transform(3401) %>%

@@ -11,6 +11,7 @@ library(animation)
 library(mgcv)
 library(vegan)
 library(gstat)
+library(beepr)
 
 setwd("~/Documents/hypoxiaMapping")
 
@@ -25,8 +26,12 @@ source('helperFunctions.R')
 #   group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
 #   select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>%
 #   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326) %>%
-#   geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>% #Louisiana offshore
-#   mutate(sE=(E-mean(E))/1000,sN=(N-mean(N))/1000) %>% #Center E/N and convert to km
+#   geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
+# 
+# Emean <- mean(unique(wDat$E)); Nmean <- mean(unique(wDat$N)) #Center values of E/N, used for scaling
+# 
+# wDat <- wDat %>% 
+#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
 #   st_transform(4326)
 # 
 # # #All YEIDs are from a single day
@@ -151,7 +156,7 @@ source('helperFunctions.R')
 # sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
 #   left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
 # rm(sDat_pca,sDatMat_imputed,sDatMat,p) #cleanup
-# save(bottomWDat,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014_2.Rdata')
+# save(bottomWDat,Emean,Nmean,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014_2.Rdata')
 
 #Load data from saved file
 load('./data/all2014_2.Rdata')
@@ -348,6 +353,7 @@ bottomWDat %>% left_join(mutate(st_drop_geometry(sDat),doy=doy),by=c('YEID','doy
 pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a tiny bit of noise to make sure that distances between points isn't exactly 0
 
+# "Standard" thin-plate spline approach
 # library(parallel)
 # cl <- makeCluster(15)
 # a <- Sys.time()
@@ -359,80 +365,130 @@ pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #
 # PCmod6 <-bam(PC6~te(sN,sE,doy,bs=c('tp','tp'),k=c(75,10),d=c(2,1)),data=pcDat,cluster=cl)
 # Sys.time()-a #4.2 mins
 # save(pcDat,PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods.RData')
-load('./data/PCmods.RData')
+# par(mfrow=c(2,2)); 
+# gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
+# summary(PCmod1)
+# gam.check(PCmod2); abline(0,1,col='red'); #Ehhhh...
+# summary(PCmod2)
+# gam.check(PCmod3); abline(0,1,col='red'); 
+# summary(PCmod3)
+# gam.check(PCmod4); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
+# summary(PCmod4)
+# gam.check(PCmod5); abline(0,1,col='red'); 
+# summary(PCmod5)
+# gam.check(PCmod6); abline(0,1,col='red'); #t-dist again
+# summary(PCmod6)
+# par(mfrow=c(1,1))
 
-par(mfrow=c(2,2)); 
-gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
-summary(PCmod1)
-gam.check(PCmod2); abline(0,1,col='red'); #Ehhhh...
-summary(PCmod2)
-gam.check(PCmod3); abline(0,1,col='red'); 
-summary(PCmod3)
-gam.check(PCmod4); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
-summary(PCmod4)
-gam.check(PCmod5); abline(0,1,col='red'); 
-summary(PCmod5)
-gam.check(PCmod6); abline(0,1,col='red'); #t-dist again
-summary(PCmod6)
-par(mfrow=c(1,1))
+# #Approach using soap-film smoothers
+# shpfileFolder <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/shapefiles"
+# regionRect <- st_read(paste0(shpfileFolder,"/region_rectangle.shp"))
+# coastBuff <- st_read(paste0(shpfileFolder,"/region_coast250kmBuffer.shp")) %>% st_geometry() #250 km buffer zone away from coast
+# coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% #Actual coast
+#   st_crop(regionRect) %>% #Crop to region
+#   st_geometry()  #Drop other info
+# dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
+# dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
+# 
+# # Knots along lines of buffer distances
+# knotLocs <- mapply(function(d,N){
+#   dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
+#   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
+#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
+#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
+#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
+#     st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
+#     st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
+#     st_line_sample(n = N,type='regular') %>% #Samples N points along line
+#     st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
+# },
+# d=c(50,150,225), #Distances
+# N=c(25,15,8) #Points within each distance
+# ) %>%
+#   do.call('c',.)
+# 
+# #Looks OK
+# plot(dataBoundary)
+# plot(knotLocs,add=TRUE,pch=19,cex=0.5)
+# length(knotLocs) #48 knots
+# 
+# #Get knot and boundary locations on same scale
+# bound <- dataBoundary %>% st_transform(3401) %>%
+#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
+# bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
+# 
+# kts <- knotLocs %>% st_transform(3401) %>%
+#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
+# 
+# library(parallel)
+# cl <- makeCluster(15)
+#  
+# #Per model: ~10 mins for 60 knots, 30 boundary loops, 15 layers for tensor product
+# modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))+
+#   te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))"
+# 
+# PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=pcDat,cluster=cl) #About 4.3 mins per model
+# PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=pcDat,cluster=cl)
+# PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=pcDat,cluster=cl)
+# PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=pcDat,cluster=cl)
+# PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=pcDat,cluster=cl)
+# PCmod6 <- bam(formula(gsub('999','PC6',modForm)),knots=kts,data=pcDat,cluster=cl)
+# stopCluster(cl)
+# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap.RData')
 
-# #Haven't gotten this to complete fitting yet. Also doesn't account for spatial correlation
-# PCmod1 <-gamm(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,10),d=c(2,1)),data=pcDat,
-#               correlation=corExp(form=~sN+sE,nugget=TRUE))
+# load('./data/PCmods.RData') #Load thin plate splines
+load('./data/PCmodsSoap.RData') #Load soap film smoother
 
-summary(PCmod1) 
-summary(PCmod2) 
-summary(PCmod3) 
-summary(PCmod4) #Not as good
-summary(PCmod5) #Not as good
-summary(PCmod6) #Not as good
-
-#See how predictions look on spatial grid 
-a <- Sys.time()
-predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
-  separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>% 
-  mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
-  mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
-  mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>%
-  mutate(predPC6=predict(PCmod6,newdata=.),sePC6=predict(PCmod6,newdata=.,se.fit=TRUE)$se.fit) %>% 
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
-Sys.time()-a #8 mins
-
-#Predicted values
-p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>% 
-  pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>% 
-  ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
-  facet_grid(name~date)+
-  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
-  labs(x='E',y='N',col='PC Value',title='Predicted value')+
-  theme(legend.position='bottom')
-
-#SE of prediction
-p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>% 
-  pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
-  ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
-  facet_grid(name~date)+
-  scale_colour_distiller(type='div',palette = "Reds",direction=1)+
-  labs(x='E',y='N',col='SE of PC Value',title='Standard error of Prediction')+
-  theme(legend.position='bottom')
-
-#Residual plots
-p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),
-                       residPC4=resid(PCmod4),residPC5=resid(PCmod5),residPC6=resid(PCmod6)) %>% 
-  pivot_longer(contains('residPC')) %>% mutate(name=gsub('residPC','PC',name)) %>% 
-  mutate(date=dateCut(date_img,9)) %>% 
-  ggplot()+geom_point(aes(x=sE,y=sN,col=value,alpha=abs(value),size=abs(value)))+
-  facet_grid(name~date)+
-  scale_colour_distiller(type='div',palette = "Spectral",direction=1)+
-  scale_alpha_continuous(range=c(0.01,0.75))+
-  labs(x='E',y='N',col='Residual',title='Residual plot')+
-  theme(legend.position='bottom')
-
-ggsave('./figures/analysis1Figs/PCAmod_pred.png',p1,width=8,height=6)
-ggsave('./figures/analysis1Figs/PCAmod_se.png',p2,width=8,height=6)
-ggsave('./figures/analysis1Figs/PCAmod_resid.png',p3,width=8,height=6)
+# #See how predictions look on spatial grid 
+# a <- Sys.time()
+# predPC <- with(pcDat,expand.grid(doy=seq(min(doy),max(doy),length.out=9),loc=unique(paste(sE,sN,sep='_')))) %>% 
+#   separate(loc,c('sE','sN'),sep='_',convert=TRUE) %>% 
+#   mutate(predPC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
+#   mutate(predPC2=predict(PCmod2,newdata=.),sePC2=predict(PCmod2,newdata=.,se.fit=TRUE)$se.fit) %>% 
+#   mutate(predPC3=predict(PCmod3,newdata=.),sePC3=predict(PCmod3,newdata=.,se.fit=TRUE)$se.fit) %>% 
+#   mutate(predPC4=predict(PCmod4,newdata=.),sePC4=predict(PCmod4,newdata=.,se.fit=TRUE)$se.fit) %>%
+#   mutate(predPC5=predict(PCmod5,newdata=.),sePC5=predict(PCmod5,newdata=.,se.fit=TRUE)$se.fit) %>%
+#   mutate(predPC6=predict(PCmod6,newdata=.),sePC6=predict(PCmod6,newdata=.,se.fit=TRUE)$se.fit) %>% 
+#   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))
+# Sys.time()-a #8 mins
+# 
+# #Predicted values
+# p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>% 
+#   pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>% 
+#   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
+#   facet_grid(name~date)+
+#   scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+#   labs(x='E',y='N',col='PC Value',title='Predicted value')+
+#   theme(legend.position='bottom')
+# 
+# #SE of prediction
+# p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>% 
+#   pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
+#   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
+#   facet_grid(name~date)+
+#   scale_colour_distiller(type='div',palette = "Reds",direction=1)+
+#   labs(x='E',y='N',col='SE of PC Value',title='Standard error of Prediction')+
+#   theme(legend.position='bottom')
+# 
+# #Residual plots
+# p3 <- pcDat %>% mutate(residPC1=resid(PCmod1),residPC2=resid(PCmod2),residPC3=resid(PCmod3),
+#                        residPC4=resid(PCmod4),residPC5=resid(PCmod5),residPC6=resid(PCmod6)) %>% 
+#   pivot_longer(contains('residPC')) %>% mutate(name=gsub('residPC','PC',name)) %>% 
+#   mutate(date=dateCut(date_img,9)) %>% 
+#   ggplot()+geom_point(aes(x=sE,y=sN,col=value,alpha=abs(value),size=abs(value)))+
+#   facet_grid(name~date)+
+#   scale_colour_distiller(type='div',palette = "Spectral",direction=1)+
+#   scale_alpha_continuous(range=c(0.01,0.75))+
+#   labs(x='E',y='N',col='Residual',title='Residual plot')+
+#   theme(legend.position='bottom')
+# 
+# ggsave('./figures/analysis1Figs/PCAmod_pred.png',p1,width=8,height=6)
+# ggsave('./figures/analysis1Figs/PCAmod_se.png',p2,width=8,height=6)
+# ggsave('./figures/analysis1Figs/PCAmod_resid.png',p3,width=8,height=6)
 
 # Fit model of DO to predicted PCs ----------------------------------
 
@@ -589,8 +645,8 @@ min(sapply(modList2,function(i) rmse(i$bottom))) #Lagged linear regression - PCA
 rmse(bWatMod2) #Functional regression - PCA
 
 #Which days do these occur on?
-lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #7-day lag
-lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #0-day lag
+lags[which.min(sapply(modList1,function(i) rmse(i$bottom)))] #22-day lag
+lags[which.min(sapply(modList2,function(i) rmse(i$bottom)))] #5-day lag
 
 #MAE
 min(sapply(modList1,function(i) mae(i$bottom))) #Lagged linear regression - PCA

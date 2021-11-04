@@ -21,7 +21,8 @@ load('./data/all2014_2.Rdata')
 #GAM imputation ------------------------------------------
 
 #Load smoothers
-load('./data/PCmods.RData')
+# load('./data/PCmods.RData') #Thin-plate splines
+load('./data/PCmodsSoap.RData') #Soap film
 
 #Get predictions of PCs at all locations through the entire season. If PC values missing, fill using PC model
 sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.),predPC3=predict(PCmod3,newdata=.)) %>% 
@@ -29,7 +30,8 @@ sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2
   mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>% 
   mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>% 
   select(-predPC1:-predPC6) %>% 
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) 
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))  #~10 seconds
+
 
 #Fit model of DO to gap-filled PCs ----------------------------------
 
@@ -108,11 +110,11 @@ ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
 #Similar to models using raw data: no global minimum appears, but local min at ~12 days
 #Simple model
-(bestDay <- which.min(sapply(modList1,function(i) mae(i$bottom)))) #Minimum mae occurs about 12 days before
-which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs about 12 days before
+(bestDay <- which.min(sapply(modList1,function(i) mae(i$bottom)))) #Minimum mae occurs on day 0 (no lag)
+which.min(sapply(modList1,function(i) rmse(i$bottom))) #Minimum rmse occurs on day 0
 #Interaction model
-(bestDay <- which.min(sapply(modList2,function(i) mae(i$bottom)))) #Minimum mae occurs on day of (no lag)
-which.min(sapply(modList2,function(i) rmse(i$bottom))) 
+(bestDay <- which.min(sapply(modList2,function(i) mae(i$bottom)))) #Minimum mae occurs on day 3
+which.min(sapply(modList2,function(i) rmse(i$bottom))) #Day 14
 
 m1 <- modList1[[bestDay]]$bottom #Save model from that day
 save(m1,file = './data/lagLinMod.Rdata')
@@ -180,7 +182,7 @@ cvPredErrs <- function(i,inter=FALSE){
   })
 }
 
-# Get prediction errors for surface/bottom, using RMSE, MAE, and R2
+# # Get prediction errors for surface/bottom, using RMSE, MAE, and R2
 # library(parallel) #Takes about 10-15 mins
 # cluster <- makeCluster(15)
 # clusterExport(cluster,c('fitLagModsCV','sDat','bottomWDat'))
@@ -200,7 +202,7 @@ cvPredErrs <- function(i,inter=FALSE){
 
 load('./data/cvPredLists.Rdata')
 
-bind_rows(cvPredList,cvPredList2) %>%  #Takes a while to run. Interaction model clearly has something wrong with it (probaby overfitting)
+bind_rows(cvPredList,cvPredList2) %>%  #Interaction model clearly has something wrong with it (probaby overfitting)
   ggplot(aes(x=lag,y=value,col=modType))+
   geom_point(alpha=0.1,position=position_dodge(width=0.5))+
   facet_wrap(~errType)+
@@ -267,7 +269,7 @@ par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) 
 plot(bWatMod,scheme=1,pages=1)
 
 
-#What is the shortest lag time that we could use and get similar results?
+#What is the shortest lag time that we could use for FR and get similar results?
 
 # #Fit FDA models with different lags (10 days - 30 days)
 # lags <- 10:30
