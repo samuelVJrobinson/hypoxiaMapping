@@ -14,6 +14,8 @@ editor_options:
 
 # Setup 
 ```{r}
+remove(list = ls())
+
 getwd()
 
 library(tidyverse)
@@ -30,7 +32,8 @@ source('helperFunctions.R') ## mae() function
 
 # Data
 
-  Load data from 3 models. 
+
+## Load data from 3 models. 
   
 ```{r}
 ## 1. load llModErr and fdaErr --------------------------------------------------------------------
@@ -38,9 +41,7 @@ load(file = './data/errDat.Rdata')
 
 
 ## 2. load RF model error data --------------------------------------------------------------------
-root <- dirname(getwd())
-
-fname <- paste0(root, '/Dead_Zone_telecoupling/data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
+fname <- paste0('../Dead_Zone_telecoupling/data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
 load(fname)
 
 acc_set <- 'testing'
@@ -82,22 +83,32 @@ names(rfErr)
 err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
                      rfErr    %>% dplyr::mutate(mod = 'RFR')) %>%
   dplyr::mutate(lag = -lag) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(med_avg = mean(med, rm.na = T)) %>% ## to get the mean of median value
   ungroup() %>%
+  arrange(mod, errType) %>%
   as.data.frame()
+
 ```
 
 
 
 # Plot
 
-## plot 1
-
-### median value
+## plot 1 - median value
 
   Tried `mean` value too, and it looks `mean` value is easier to identify the *best day*. 
   
+  --> also thinking about to highlight days with higher accuracy then the average of (medians), but still, no clear pattern found. 
+  
+  --> So, just present the trends of `median`...
+  
 ```{r}
-### highlight the best day for prediction
+
+## 1. the input data for plot
+
+
+## 2. identify the best day by looking for the date with the highest model accuracy 
 err_2models_bestday <- err_2models %>% 
   dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
   group_by(mod, errType) %>%
@@ -107,7 +118,7 @@ err_2models_bestday <- err_2models %>%
   # dplyr::filter(!is.na(bestday)) %>%
   as.data.frame()
 
-### the 2nd best day
+### - to add the 2nd best day as well?
 err_2models_bestday21 <- err_2models %>% 
   ungroup() %>%
   dplyr::filter(errType != 'R2') %>%
@@ -129,11 +140,14 @@ err_2models_bestday22 <- err_2models %>%
 err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
 
 
-### plot
+
+
+### 3. plot
 (p1 <- ggplot(err_2models, aes(x=lag, y=med))+
     geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
-    geom_line()+                  # aes(col = med), 
-    scale_color_viridis() + 
+    # geom_line(aes(color = ifelse(med>med_avg, 1, 2)))+                  # size = ifelse(med>med_avg, 1, 0.5)
+    geom_line()+
+    scale_color_viridis() +
     geom_line(aes(y=withinSampErr),col='red')+
     geom_vline(data = err_2models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
     # geom_vline(data = err_2models_bestday2, aes(xintercept = bestday), linetype = "dashed", color="green") +  ## --> not good
@@ -145,7 +159,7 @@ err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
 
 
 
-### moving average of median
+## plot 1 - moving average of median
   
   The result is not good - give up this option. 
   
