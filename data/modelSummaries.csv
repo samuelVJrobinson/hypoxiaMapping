@@ -1,13 +1,13 @@
 Model,Error type,Data type,RMSE,MAE,R2,Residual DF,Notes
-Lagged Linear PCA no Interaction,Training (within-sample),Smoothed,1.478834,1.180653,0.3846508,198,7-day lag
-Lagged Linear PCA with Interaction,Training (within-sample),Smoothed,1.124149,0.8542359,0.6444254,172,0-day lag
-Functional Linear PCA,Training (within-sample),Smoothed,1.234206,0.9161689,0.5586434,185.8769,
+Lagged Linear PCA no Interaction,Training (within-sample),Smoothed,1.424119,1.1405,0.4293427,198,22-day lag
+Lagged Linear PCA with Interaction,Training (within-sample),Smoothed,1.12945,0.8521019,0.6410642,172,5-day lag
+Functional Linear PCA,Training (within-sample),Smoothed,1.192934,0.9127814,0.5598939,184.6947,
 Lagged Linear PCA no Interaction,Training (within-sample),Raw,0.7057437,0.5949337,0.7297565,24,11-day lag
 Lagged Linear PCA with Interaction,Training (within-sample),Raw,0.3142684,0.1919677,0.9779264,7,13-day lag
 Functional Linear PCA,Training (within-sample),Raw,NA,NA,NA,NA,Not possible: too few days without data gaps
-Lagged Linear PCA no Interaction,Training (within-sample),Gap-filled,1.443553,1.14142,0.4136613,197,12-day lag
-Lagged Linear PCA with Interaction,Training (within-sample),Gap-filled,1.215682,0.9267693,0.5841634,172,0-day lag
-Functional Linear PCA,Training (within-sample),Gap-filled,1.184618,0.9199085,0.5465786,176.7801,
-Lagged Linear PCA no Interaction,Test (out-of-sample),Gap-filled,1.56583,1.230413,0.33353981,NA,0-day lag
-Lagged Linear PCA with Interaction,Test (out-of-sample),Gap-filled,6.341016,2.314943,0.09018224,NA,27-day lag
-Functional Linear PCA,Test (out-of-sample),Gap-filled,1.55,1.24,0.37,NA,
+Lagged Linear PCA no Interaction,Training (within-sample),Gap-filled,1.410987,1.117956,0.4398183,197,0-day lag
+Lagged Linear PCA with Interaction,Training (within-sample),Gap-filled,1.187385,0.8946908,0.6032965,172,13-day lag
+Functional Linear PCA,Training (within-sample),Gap-filled,1.14666,0.8985778,0.5695967,174.491,
+Lagged Linear PCA no Interaction,Test (out-of-sample),Gap-filled,1.511162,1.227787,0.3770358,NA,1-day lag
+Lagged Linear PCA with Interaction,Test (out-of-sample),Gap-filled,4.549913,1.842272,0.1870523,NA,16-day lag
+Functional Linear PCA,Test (out-of-sample),Gap-filled,1.44,1.14,0.442,NA,
