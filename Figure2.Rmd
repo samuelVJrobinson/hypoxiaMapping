@@ -80,22 +80,79 @@ names(fdaErr)
 names(llModErr)
 names(rfErr)
 
-err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
+## make sure `fdaErr` is the same format as `llModErr`
+fdaErr <- fdaErr %>% 
+  dplyr::rename(errType=name, 
+                max = upr, 
+                min = lwr) %>%
+  dplyr::mutate(iqr = NA) %>%
+  dplyr::select(names(llModErr))
+
+```
+
+
+
+
+
+
+# Plot
+
+## 3 models 
+
+```{r}
+## 1. the input data for plot
+err_3models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
+                     fdaErr   %>% dplyr::mutate(mod = 'FDA'),
                      rfErr    %>% dplyr::mutate(mod = 'RFR')) %>%
   dplyr::mutate(lag = -lag) %>%
   group_by(mod, errType) %>%
   dplyr::mutate(med_avg = mean(med, rm.na = T)) %>% ## to get the mean of median value
   ungroup() %>%
   arrange(mod, errType) %>%
+  dplyr::mutate(mod = factor(mod, levels = c('LLR', 'RFR', 'FDA')),
+                errType = factor(errType, levels = c('MAE', 'RMSE', 'R2'))) %>%
   as.data.frame()
 
+
+
+
+## 2. identify the best day by looking for the date with the highest model accuracy 
+err_3models_bestday <- err_3models %>% 
+  dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(best    = ifelse(errType != 'R2', min(med), max(med, na.rm = T)),
+                bestday = ifelse(med == best, lag, NA)) %>%
+  arrange(mod, errType, med) %>%
+  # dplyr::filter(!is.na(bestday)) %>%
+  as.data.frame()
+
+### 3. plot
+(p <- ggplot(err_3models, aes(x=lag, y=med))+
+    geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+    geom_line()+
+    scale_color_viridis() +
+    geom_line(aes(y=withinSampErr),col='red')+
+    # geom_vline(data = err_3models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+    facet_grid(errType~mod, scales = 'free_y')+
+    labs(x='Time lag', y='Model Accuracy') +
+    theme_bw()
+)
+
+ggsave('./figures/outOfSamp_comparison_3models_new.png', p, width=7, height=6)
 ```
 
 
 
-# Plot
 
-## plot 1 - median value
+**The following code was used for FDA results without testing accuracy when feeding in different time ranges data**
+
+**might be useful for future, but not now**
+
+## 2 models + 1 model
+
+### plot 1 - LLR + RFR
+  
+  **median value**
 
   Tried `mean` value too, and it looks `mean` value is easier to identify the *best day*. 
   
@@ -106,6 +163,15 @@ err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
 ```{r}
 
 ## 1. the input data for plot
+err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
+                     rfErr    %>% dplyr::mutate(mod = 'RFR')) %>%
+  dplyr::mutate(lag = -lag) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(med_avg = mean(med, rm.na = T)) %>% ## to get the mean of median value
+  ungroup() %>%
+  arrange(mod, errType) %>%
+  as.data.frame()
+
 
 
 ## 2. identify the best day by looking for the date with the highest model accuracy 
@@ -159,11 +225,16 @@ err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
 
 
 
-## plot 1 - moving average of median
+
+
+
+
+
+**plot 1 - moving average of median**
   
   The result is not good - give up this option. 
   
-```{r}
+```{r eval=FALSE, include=FALSE}
 err_2models_ma <- err_2models %>%
   dplyr::group_by(mod, errType) %>%
   dplyr::mutate(
@@ -198,7 +269,7 @@ err_2models_ma_bestday <- err_2models_ma %>%
 
 
 
-## plot 2
+### plot 2 - FDA
 
 ```{r}
 ### to keep the y-axis at the same scale in all three plots, here we add the max and min value from p1 to p2. 
@@ -234,11 +305,14 @@ fdaErr2 <- rbind(fdaErr %>% as.data.frame(), err_2models_MaxMin)
 
 
 
-## combine plot 1 and 2
+### combine plot 1 and 2
 ```{r}
 (p <- ggarrange(p1,p2,nrow=1, widths = c(2,1)))
 
 ggsave('./figures/outOfSamp_comparison_3models.png', p, width=8, height=4)
 
 ```
+
+
+
 

@@ -1,0 +1,233 @@
+---
+title: "Untitled"
+author: "Yingjie"
+date: "11/2/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+# Package
+
+```{r}
+remove(list = ls())
+
+library(raster)
+
+library(tmap)
+library(sf)
+
+library(tidyverse)
+library(viridis)
+```
+
+
+# Data
+
+
+## DO predict maps
+```{r}
+
+which_dat <- "RF"
+which_do  <- "meanDO"
+  
+## data path
+dir.do.tif <- '../Dead_Zone_telecoupling/data/data_from_gee/predict_do_maps_lag10d/'
+
+
+## raster
+ras <- paste0(dir.do.tif, 'dz_weeks_recurrence_2014_percent.tif'); ras
+ras <- raster(ras)
+ras[ras == 0] <- NA
+
+bhu_bb <- st_bbox(ras, crs = st_crs(4326))
+bhu_bb_sf <- st_as_sfc(st_bbox(ras), crs = st_crs(4326))
+bhu_bb_sf_buf <- st_buffer(bhu_bb_sf, dist = 1)
+
+plot(bhu_bb)
+
+plot(bhu_bb_sf_buf)
+plot(bhu_bb_sf, add = T)
+```
+
+
+
+## shape files
+```{r}
+
+rivers <- '../Dead_Zone_telecoupling/data/shp/TWAP_rivers.shp'
+riv <- st_read(rivers) %>%
+  st_as_sf() %>%
+  dplyr::select(name)
+
+shp <- 'D:/data/NaturalEarthData/ne_50m_admin_1_states_provinces/ne_50m_admin_1_states_provinces.shp'
+usa <- sf::st_read(shp) %>%
+  st_as_sf() %>%
+  dplyr::filter(adm0_a3 == 'USA') %>%
+  dplyr::select(name)
+
+usa_gulf <- st_crop(usa, bhu_bb_sf)
+plot(usa_gulf)
+
+save(bhu_bb, riv, usa, file = './data/helper_data_map.RData')
+```
+
+
+
+# Plot
+
+## dz freq map
+
+```{r}
+
+dz_freq <- 
+  tm_shape(ras, bbox = bhu_bb_sf_buf) + 
+  tm_raster(style = "fixed", title = "Frequency (%)",
+            breaks = c(0, 10, 25, 50, 60),
+            # legend.hist = TRUE,
+            palette = "-plasma")+ ## terrain.colors(5)
+  # tm_legend(outside = TRUE, hist.width = 2) +
+  # tm_scale_bar(position = c(0.2, .005), size=.8, text.color = 'white')+
+  tm_shape(usa) + tm_polygons(col = "gray90",  border.col = "gray60", legend.show=F) + tm_text("name", col = 'gray60', fontface = 'bold', auto.placement = T, remove.overlap = T) +
+  tm_shape(riv) + tm_lines(col = "royalblue1", lwd = 1.5, legend.col.show = F, legend.lwd.show = F) +
+  tm_layout(legend.position= c("left", "bottom"), bg.color = 'black', legend.text.color = 'white', legend.title.color= 'white')
+dz_freq
+tmap_save(dz_freq, filename="./figures/dz_freq.png", height=3, width=7, units="in", dpi=300)
+
+
+
+# tm_shape(ras) + 
+#   tm_raster(style = "cont", title = "Elevation (m)",
+#             palette = terrain.colors(64))+
+#   tm_legend(outside = TRUE)
+
+# tm_shape(ras) + 
+#   tm_raster(style = "quantile", n = 12, title = "Elevation (m)",
+#             palette = colorRampPalette( c("darkolivegreen4","yellow", "brown"))(12),
+#             legend.hist = TRUE)+
+#   tm_legend(outside = TRUE, hist.width = 2)
+```
+
+
+
+## do time series maps
+
+  Test data
+  
+```{r}
+## do map every 10d ----
+
+### raster of dz every 10 d
+ras <- paste0(dir.do.tif, 'do_map_20140601.tif'); ras
+dz  <- raster(ras) 
+
+domap <-
+  tm_shape(dz, bbox = bhu_bb) + 
+  tm_raster(style = "fixed", title = "DO (mg/l)",
+            breaks = seq(0, 8, 2),
+            palette = brewer.pal(9,"RdYlBu")) + 
+  tm_shape(usa_gulf) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+  tm_layout(legend.position= c("left", "bottom"), 
+            title= 'DO map on ...', title.position = c('left', 'top'),
+            # main.title = 'DO map on 6/1', main.title.position = "left", 
+            bg.color = 'black', legend.bg.color = 'black', 
+            legend.text.color = 'white', legend.title.color= 'white')
+domap
+# tmap_save(dz_freq, filename="dz_freq.png", height=3, width=7, units="in", dpi=300)
+```
+
+
+
+## Loop plot
+```{r}
+ras_ls <- list.files(path = dir.do.tif, pattern = '^do_map_2014', full.names = T); ras_ls
+
+counter = 0
+for (ras in ras_ls) {
+  
+  ## this will be used to determine if to add a legend --> only add a legend to the 1st map
+  counter = counter + length(ras); #print(counter)
+  yes_or_no <- if(counter < 2) 1 else 0
+  print(yes_or_no)
+  
+  date_ini <- basename(ras) %>% gsub('do_map_|\\.tif', '', .) %>% as.Date(., "%Y%m%d"); #print(date_ini)
+  date_end <- (date_ini) + 9; #print(date_ini)
+  # ras_nm <- paste0(date_ini, ' ~ ', date_end); print(ras_nm)
+  ras_nm <- date_ini %>% gsub('-', '', .); print(ras_nm)
+  map_nm <- paste0('domap_', ras_nm)
+
+  dz  <- raster(ras)
+
+  domap <-
+    tm_shape(dz, bbox = bhu_bb) +
+    tm_raster(style = "fixed", title = "DO (mg/l)",
+              breaks = seq(0, 8, 2), legend.reverse = F, legend.is.portrait = T,
+              palette = brewer.pal(9,"RdYlBu"), legend.show = yes_or_no) +
+    tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+    tm_layout(bg.color = 'black', legend.height = 0.6, #legend.width = .3, #legend.text.size = 1.5, legend.title.size = 1.5, 
+              legend.bg.color = 'black', legend.bg.alpha = 0.5, 
+              outer.bg.color = 'white', frame = T,
+              legend.text.color = 'white', legend.title.color= 'white', 
+              # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+              # title= ras_nm, title.position = c('left', 'top'),
+              title = ras_nm, title.position = c(0, 0.95), title.size = 0.7,
+              legend.position= c("right", "bottom"), legend.just = 'bottom')
+  # domap
+  assign(map_nm, domap)
+}
+
+
+domap_ls <- mget(ls(pattern = '^domap_2014'))
+
+# domaps <- tmap_arrange(domap_ls, ncol = 3, sync = T, outer.margins = 0)
+# domaps
+# tmap_save(domaps, filename="do_maps.png", height=8, width=7, units="in", dpi=300)
+```
+
+
+
+
+
+### put maps on a panel - 1 cols
+
+```{r}
+source('./func_domap_1col.R')
+func_domap_1col(n_plots = 9, h = 3.2)
+
+```
+
+
+
+### put maps on a panel - 3 cols
+
+```{r eval=FALSE, include=FALSE}
+library(grid)
+fname <- paste0("./figures/do_maps_", which_dat, "_3col.png"); fname
+png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
+# by rows 
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(
+  nrow = 3,
+  ncol = 3
+  )))
+
+z = 0
+for (i in 1:4) {
+  # print(i)
+  for (j in 1:3) {
+    z = z + length(i)
+    print(z)
+    
+    if (z>9) {
+      break
+    }
+    print(domap_ls[z], vp = viewport(layout.pos.row = i, layout.pos.col = j))
+  }
+}
+
+dev.off()
+```
+
+
