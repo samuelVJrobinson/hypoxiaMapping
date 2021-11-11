@@ -88,6 +88,14 @@ fdaErr <- fdaErr %>%
   dplyr::mutate(iqr = NA) %>%
   dplyr::select(names(llModErr))
 
+# names(fdaErr)
+# fdaErr_na10 <- fdaErr %>%
+#   dplyr::filter(lag < 20) %>%
+#   dplyr::mutate(lag = lag - 10) %>%
+#   dplyr::mutate_at(vars(med:withinSampErr), ~replace(., is.numeric(.), NA))
+#   # dplyr::mutate_at(c("med","max","min","iqr","withinSampErr"), as.na(), na.rm = TRUE)
+# 
+# fdaErr <- rbind(fdaErr, fdaErr_na10)
 ```
 
 
@@ -114,7 +122,7 @@ err_3models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
   as.data.frame()
 
 
-
+str(err_3models)
 
 ## 2. identify the best day by looking for the date with the highest model accuracy 
 err_3models_bestday <- err_3models %>% 
@@ -126,20 +134,31 @@ err_3models_bestday <- err_3models %>%
   # dplyr::filter(!is.na(bestday)) %>%
   as.data.frame()
 
+
+
 ### 3. plot
-(p <- ggplot(err_3models, aes(x=lag, y=med))+
-    geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+(p <- ggplot(data = err_3models, aes(x=lag, y=med))+
+    
     geom_line()+
-    scale_color_viridis() +
     geom_line(aes(y=withinSampErr),col='red')+
+    geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+    scale_color_viridis() +
+    
+    ## --> To highlight the best data range for prediction  
     # geom_vline(data = err_3models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+    geom_rect(
+      data = data.frame(mod = factor(c('LLR', 'RFR'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-4,xmax=0, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.1) + 
     facet_grid(errType~mod, scales = 'free_y')+
     labs(x='Time lag', y='Model Accuracy') +
     theme_bw()
 )
 
-ggsave('./figures/outOfSamp_comparison_3models_new.png', p, width=7, height=6)
+ggsave('./figures/outOfSamp_comparison_3models_new.png', p, width=7, height=5)
 ```
+
+
 
 
 

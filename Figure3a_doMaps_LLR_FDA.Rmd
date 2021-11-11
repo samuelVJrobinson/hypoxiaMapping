@@ -56,8 +56,8 @@ head(LLmapDatFull)
 ```{r}
 
 ## --> 1st to choos -----------------------> 
-dat <- FRmapDat; which_dat <- 'FR'
-# dat <- LLmapDat; which_dat <- 'LL'
+# dat <- FRmapDat; which_dat <- 'FR'
+dat <- LLmapDat; which_dat <- 'LL'
 
 
 ## --> 2nd to choose ---------------------->

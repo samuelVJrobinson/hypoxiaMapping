@@ -11,10 +11,17 @@ func_domap_1col <- function(n_plots, h) {  #@ the total number of plots
   
   grid.newpage()
   pushViewport(viewport(layout = grid.layout(
-    nrow = n_plots+1, ncol = 1, heights = c(0.01, rep(0.99/n_plots, n_plots))
+    nrow = n_plots+1, ncol = 1, heights = c(0.015, rep(0.99/n_plots, n_plots))
   )))
   
-  grid.text(label = paste0(which_dat, 'R'), vp = viewport(layout.pos.row = 1), gp = gpar(fontsize = 10, fontface = "bold"))
+  
+  if (which_dat == 'FR') {
+    text_header <- 'FDA'
+  } else {
+    text_header <- paste0(which_dat, 'R')
+  }
+  
+  grid.text(label = text_header, vp = viewport(layout.pos.row = 1), gp = gpar(fontsize = 10, fontface = "bold"))
   
   z = 0
   for (i in 1:n_plots) {

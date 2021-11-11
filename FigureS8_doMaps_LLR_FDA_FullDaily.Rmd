@@ -160,8 +160,9 @@ plot(r_dz, col = 'red', legend = F)
 
 ## GEE:        12366 km2
 ## approach 1: 12404 km2 ## The best --> to use this one for the following calculations
-## approach 1: wrong
-## approach 1: 12415 km2
+## approach 2: wrong
+## approach 3: 12415 km2
+## approach 4: 12434 km2 (terra)
 
 
 
@@ -185,6 +186,19 @@ tapply(area(r_dz), r_dz[], sum)
 # cell_size <- cell_size[!is.na(cell_size)]
 # #compute area [km2] of all cells in geo_raster
 # raster_area <- length(cell_size)*median(cell_size); raster_area
+
+
+
+
+### approach 3 -------------------------------------------
+
+# library(terra)
+### SpatRaster 
+# r <- rast(x = r_name)
+# r_dz <- func_dz_raster(r = r)
+# plot(r_dz, col = 'red', legend = F)
+# # summed area in km2
+# terra::expanse(r_dz, unit="km", transform=TRUE)
 
 ```
 
@@ -339,6 +353,7 @@ ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in'
 
 library(lubridate)
 
+## --> create a time frame, in which put every 10 days as a slot
 ds <- data.frame(date = seq(as.Date("2014-05-01"), as.Date("2014-09-01"), by="days")) %>%
   dplyr::mutate(y = year(date),
                 m = month(date),
@@ -351,35 +366,85 @@ ds <- data.frame(date = seq(as.Date("2014-05-01"), as.Date("2014-09-01"), by="da
   dplyr::select(date, slot) %>%
   as.data.frame()
 
-
+## --> get the median value of each 10-day slot, for `LLR` and `FDA`
+## --> then row bind with `RFR` data
 area_dz_10d <- merge(area_dz, ds, by = 'date', all.x = T) %>%
   group_by(model, slot) %>%
   dplyr::summarise(med = median(area, na.rm = T)) %>%
   dplyr::rename(area = med, date = slot) %>%
   as.data.frame() %>%
   rbind(area_dz_rf) %>%
+  dplyr::mutate(model = factor(x = model, levels = c('LL', 'RF', 'FR'), labels = c('LLR', 'RFR', 'FDA'))) %>%
   as.data.frame()
 
 str(area_dz_10d)
 
 
-## - plot ------------------------------------------------------------------------------------------
+## - plot 1 - whole time range ---------------------------------------------------------------------
 area_dz_10d %>%
-  # dplyr::filter(date > as.Date('2014-06-01')) %>%
   ggplot(aes(x = date, y = area, color = model, fill = model)) +
   geom_point() +
   geom_smooth(method = 'loess', formula = 'y~x') +
   ylab('Area (sq km)')+ xlab('Date') +
   theme_bw() +
-  theme(legend.position = c(0.1, 0.8))
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85))
 
 fname <- paste0('./figures/', 'area_dz_overTime_3models.png'); fname
-ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in', dpi = 300)
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 6, units = 'in', dpi = 300)
+
+
+
+
+## - plot 2 - only 6/1 - 9/1
+
+area_dz_10d %>%
+  dplyr::filter(date >= as.Date('2014-06-01'), date <= as.Date('2014-09-01')) %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point(show.legend = F, size = 1) +
+  geom_smooth(method = 'loess', formula = 'y~x', show.legend = T) +
+  geom_vline(xintercept = as.Date('2014-06-09'), linetype = 'dashed', color = 'gray50') +
+  geom_vline(xintercept = as.Date('2014-09-11'), linetype = 'dashed', color = 'gray50') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw() +
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85), panel.grid.minor = element_blank())
+fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 6, units = 'in', dpi = 300)
+
+
+
+
+## - plot 2 - only 6/1 - 9/1 -- facet
+area_dz_10d %>%
+  # dplyr::filter(date >= as.Date('2014-05-20'), date <= as.Date('2014-09-03')) %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point(show.legend = F, size = 1) +
+  geom_smooth(method = 'loess', formula = 'y~x', show.legend = F) +
+  geom_vline(xintercept = as.Date('2014-06-09'), linetype = 'dashed', color = 'gray50') +
+  geom_vline(xintercept = as.Date('2014-09-11'), linetype = 'dashed', color = 'gray50') +
+  # geom_segment(aes(x = as.Date('2014-08-21'), xend = as.Date('2014-07-25'), 
+  #                  y = 12000, yend = 13000), show.legend = F,
+  #                 arrow = arrow(length = unit(0.5, "cm"))) +
+  facet_wrap(~model) + #, scales = 'free_y'
+  ylab('Area (sq km)')+ xlab('Date') +
+  # ylim(-3000, NA) +
+  theme_bw() +
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85), panel.grid.minor = element_blank(), panel.grid.major.x = element_blank())
+fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1_facet.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 3, units = 'in', dpi = 300)
 
 ```
 
 
 
+
+
+
+# -----------------------------------------
+
+# Figure S8
 
 ## Plot maps --- (7/21 - 7/31)
 
@@ -391,8 +456,8 @@ source('./func_domap_1col.R')
 
 ### FDA, LLR
 ```{r}
-dat <- FRmapDatFull; which_dat <- 'FR'
-# dat <- LLmapDatFull; which_dat <- 'LL'
+# dat <- FRmapDatFull; which_dat <- 'FR'
+dat <- LLmapDatFull; which_dat <- 'LL'
 
 
 ### load help data, such as the Gulf states, rivers, state boundary
@@ -454,35 +519,34 @@ library(grid)
 
 
 ## 1. in a 3*3 panel --------------------------
-fname <- paste0("./figures/do_maps_SI_", which_dat, '_', which_do,  "_3col.png"); fname
-png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
-
-# by rows 
-grid.newpage()
-pushViewport(viewport(layout = grid.layout(
-  nrow = 4,
-  ncol = 3
-  )))
-
-z = 0
-for (i in 1:4) {
-  # print(i)
-  for (j in 1:3) {
-    z = z + length(i)
-    print(z)
-    
-    if (z>12) {
-      break
-    }
-    print(domap_ls[z], vp = viewport(layout.pos.row = i, layout.pos.col = j))
-  }
-}
-
-dev.off()
+# fname <- paste0("./figures/do_maps_SI_", which_dat, '_', which_do,  "_3col.png"); fname
+# png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
+# 
+# # by rows 
+# grid.newpage()
+# pushViewport(viewport(layout = grid.layout(
+#   nrow = 4,
+#   ncol = 3
+#   )))
+# 
+# z = 0
+# for (i in 1:4) {
+#   # print(i)
+#   for (j in 1:3) {
+#     z = z + length(i)
+#     print(z)
+#     
+#     if (z>12) {
+#       break
+#     }
+#     print(domap_ls[z], vp = viewport(layout.pos.row = i, layout.pos.col = j))
+#   }
+# }
+# dev.off()
 
 
 ## 2. in a n row * 1 col panel --------------------------
-func_domap_1col(n_plots = 11, h = 4)
+func_domap_1col(n_plots = 11, h = 3.2)
 ```
 
 
@@ -563,7 +627,7 @@ for (i in 1:length(ras_ls)) {
 
 domap_ls <- mget(ls(pattern = paste0('domap_', which_dat, '2014')))
 
-func_domap_1col(n_plots = 11, h =4)
+func_domap_1col(n_plots = 11, h = 3.2)
 
 ```
 
