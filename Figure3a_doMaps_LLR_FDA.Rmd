@@ -56,8 +56,8 @@ head(LLmapDatFull)
 ```{r}
 
 ## --> 1st to choos -----------------------> 
-# dat <- FRmapDat; which_dat <- 'FR'
-dat <- LLmapDat; which_dat <- 'LL'
+dat <- FRmapDat; which_dat <- 'FR'
+# dat <- LLmapDat; which_dat <- 'LL'
 
 
 ## --> 2nd to choose ---------------------->
@@ -90,6 +90,7 @@ gridded(df) <- TRUE
 
 r <- raster(df) 
 class(r)
+crs(r)
 
 ## plot raster
 plot(r)
@@ -167,7 +168,7 @@ for (slice_id in slice_ls) {
   ## --------------------------------------------------------------- #
   
   ## - write it as a geoTIFF
-  fname <- paste0("./data/results/", which_dat, "map_", which_do, '_', date_ini, ".tif"); fname
+  fname <- paste0("./data/results/", which_dat, "map_", which_do, '_', date_ini, ".tif"); print(fname)
   writeRaster(r, filename = fname, overwrite=TRUE)
 }
 ```
@@ -188,7 +189,21 @@ ras_ls <- list.files(path = './data/results/', pattern = pat, full.names = T); r
 
 
 ### test use
-# ras <- ras_ls[1]; ras
+# ras <- ras_ls[7]; ras
+# dz  <- raster(ras)
+# plot(dz)
+# plot(bhu_bb)
+# dev.off()
+
+e <- as(extent(c(xmin= -97.73591, xmax= -81.35675, ymin= 27.5, ymax= 30.56061)), 'SpatialPolygons')
+crs(e) <- "+proj=longlat +datum=WGS84 +no_defs"
+bhu_bb3 <- st_bbox(e, crs = st_crs(4326));
+bhu_bb3
+
+
+
+# bg_color = '#4575B4' ## blue, same as the 'sea'
+bg_color = 'gray50'  ## gray, as NA
 
 
 ### loop and plot the DO raster
@@ -198,27 +213,29 @@ for (ras in ras_ls) {
   date_ini <- basename(ras) %>% gsub("\\D", "", .) %>% as.Date(., "%Y%m%d"); print(date_ini)
   date_end <- (date_ini) + 9; #print(date_ini)
   # ras_nm <- paste0(date_ini, ' ~ ', date_end); print(ras_nm)
-  ras_nm <- date_ini %>% gsub('-', '', .); print(ras_nm)
+  ras_nm <- date_ini %>% gsub('-', '', .); #print(ras_nm)
   map_nm <- paste0('domap_', ras_nm)
   
   dz  <- raster(ras)
   dz[dz < 0] <- 0    ## turn negative values to 0
+  # crs(dz) <- ras_crs
+  # dz <- raster::crop(dz, e)
   
   domap <-
-    tm_shape(dz, bbox = bhu_bb) +
+    tm_shape(dz, bbox = bhu_bb3) +
     tm_raster(style = "fixed", 
               # style = "cont",
               title = "DO (mg/l)",
               breaks = seq(0, 8, 2),
               palette = brewer.pal(9,"RdYlBu"), legend.show = F) +
     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
-    tm_layout(bg.color = '#4575B4', legend.height = 1,
+    tm_layout(bg.color = bg_color, legend.height = 1,
               legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
               legend.text.color = 'white', legend.title.color= 'white',
               # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
-              title = ras_nm, title.position = c(0, 0.95), title.size = 0.7,
+              title = ras_nm, title.position = c(0, 0.9), title.size = 0.7,
               legend.position= c("left", "bottom"))
-  # domap
+  domap
   
   ## to assign a name to each plot for later use
   assign(map_nm, domap)
@@ -239,34 +256,9 @@ library(grid)
 
 ## This function aims to plot multiple maps in one column 
 source('./func_domap_1col.R')
-func_domap_1col(n_plots = 9, h = 3.2)
+# func_domap_1col(n_plots = 9, h = 3.2)
+func_domap_1col(n_plots = 9, h = 3.2/2)
 
-
-# fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_1col.png"); fname
-# png(filename = fname, pointsize =12, width = 7/3, height = 4/3*9, units="in", res = 300)
-# 
-# grid.newpage()
-# pushViewport(viewport(layout = grid.layout(
-#   nrow = 10, ncol = 1, heights = c(0.01, rep(0.99/9, 9))
-#   )))
-# 
-# grid.text(label = paste0(which_dat, 'R'), vp = viewport(layout.pos.row = 1))
-# 
-# z = 0
-# for (i in 1:9) {
-#   # print(i)
-#   # for (j in 1:3) {
-#     z = z + length(i)
-#     print(z)
-#     
-#     if (z>9) {
-#       break
-#     }
-#     print(domap_ls[z], vp = viewport(layout.pos.row = z+1))
-#   # }
-# }
-# 
-# dev.off()
 ```
 
 

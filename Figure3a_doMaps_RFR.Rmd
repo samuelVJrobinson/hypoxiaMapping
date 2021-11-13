@@ -41,15 +41,36 @@ dir.do.tif <- '../Dead_Zone_telecoupling/data/data_from_gee/predict_do_maps_lag1
 ras <- paste0(dir.do.tif, 'dz_weeks_recurrence_2014_percent.tif'); ras
 ras <- raster(ras)
 ras[ras == 0] <- NA
+ras_crs <- crs(ras)
 
-bhu_bb <- st_bbox(ras, crs = st_crs(4326))
+bhu_bb <- st_bbox(ras, crs = st_crs(4326)); 
 bhu_bb_sf <- st_as_sfc(st_bbox(ras), crs = st_crs(4326))
 bhu_bb_sf_buf <- st_buffer(bhu_bb_sf, dist = 1)
 
 plot(bhu_bb)
-
 plot(bhu_bb_sf_buf)
 plot(bhu_bb_sf, add = T)
+
+
+bhu_bb
+bhu_bb1 <- bhu_bb
+bhu_bb2 <- bhu_bb
+bhu_bb2[2] <- 20
+
+
+# par(mfrow=c(1,2))
+# plot(bhu_bb1)
+# plot(bhu_bb2)
+
+
+e <- as(extent(c(xmin= -97.73591, xmax= -81.35675, ymin= 27.5, ymax= 30.56061)), 'SpatialPolygons')
+crs(e) <- "+proj=longlat +datum=WGS84 +no_defs"
+bhu_bb3 <- st_bbox(e, crs = st_crs(4326)); 
+# plot(bhu_bb3)
+
+
+### --> choose one as input 
+bhu_bb <- bhu_bb3
 ```
 
 
@@ -69,9 +90,9 @@ usa <- sf::st_read(shp) %>%
   dplyr::select(name)
 
 usa_gulf <- st_crop(usa, bhu_bb_sf)
-plot(usa_gulf)
+# plot(usa_gulf)
 
-save(bhu_bb, riv, usa, file = './data/helper_data_map.RData')
+save(bhu_bb, bhu_bb3, riv, usa, file = './data/helper_data_map.RData')
 ```
 
 
@@ -116,23 +137,33 @@ tmap_save(dz_freq, filename="./figures/dz_freq.png", height=3, width=7, units="i
 
   Test data
   
-```{r}
+```{r eval=FALSE, include=FALSE}
 ## do map every 10d ----
 
 ### raster of dz every 10 d
 ras <- paste0(dir.do.tif, 'do_map_20140601.tif'); ras
 dz  <- raster(ras) 
 
+# par(mfrow=c(1,2))
+# plot(dz)
+# 
+# bhu_bb1
+# e <- as(extent(c(xmin= -97.73591, xmax= -81.35675, ymin= 27, ymax= 30.56061)), 'SpatialPolygons')
+# crs(e) <- "+proj=longlat +datum=WGS84 +no_defs"
+# bhu_bb5 <- st_bbox(e, crs = st_crs(4326));
+# # dz <- raster::crop(dz, e)
+# # plot(dz)
+# dev.off()
+
 domap <-
-  tm_shape(dz, bbox = bhu_bb) + 
+  tm_shape(dz, bbox = bhu_bb) +
   tm_raster(style = "fixed", title = "DO (mg/l)",
             breaks = seq(0, 8, 2),
-            palette = brewer.pal(9,"RdYlBu")) + 
+            palette = brewer.pal(9,"RdYlBu")) +
   tm_shape(usa_gulf) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
-  tm_layout(legend.position= c("left", "bottom"), 
-            title= 'DO map on ...', title.position = c('left', 'top'),
-            # main.title = 'DO map on 6/1', main.title.position = "left", 
-            bg.color = 'black', legend.bg.color = 'black', 
+  tm_layout(legend.position= c(0.85, 0.05),
+            title= 'DO map', title.position = c(0.01, 0.95),
+            bg.color = 'black', legend.bg.color = 'black',
             legend.text.color = 'white', legend.title.color= 'white')
 domap
 # tmap_save(dz_freq, filename="dz_freq.png", height=3, width=7, units="in", dpi=300)
@@ -144,11 +175,14 @@ domap
 ```{r}
 ras_ls <- list.files(path = dir.do.tif, pattern = '^do_map_2014', full.names = T); ras_ls
 
+bg_color = '#4575B4' ## blue, same as the 'sea'
+bg_color = 'gray50'  ## gray, as NA
+
 counter = 0
 for (ras in ras_ls) {
   
   ## this will be used to determine if to add a legend --> only add a legend to the 1st map
-  counter = counter + length(ras); #print(counter)
+  counter = counter + length(ras); 
   yes_or_no <- if(counter < 2) 1 else 0
   print(yes_or_no)
   
@@ -161,20 +195,20 @@ for (ras in ras_ls) {
   dz  <- raster(ras)
 
   domap <-
-    tm_shape(dz, bbox = bhu_bb) +
+    tm_shape(dz, bbox = bhu_bb3) +
     tm_raster(style = "fixed", title = "DO (mg/l)",
               breaks = seq(0, 8, 2), legend.reverse = F, legend.is.portrait = T,
               palette = brewer.pal(9,"RdYlBu"), legend.show = yes_or_no) +
     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
-    tm_layout(bg.color = 'black', legend.height = 0.6, #legend.width = .3, #legend.text.size = 1.5, legend.title.size = 1.5, 
-              legend.bg.color = 'black', legend.bg.alpha = 0.5, 
+    tm_layout(bg.color = bg_color, legend.height = 1, #legend.width = .3, #legend.text.size = 1.5, legend.title.size = 1.5, 
+              legend.bg.color = 'black', legend.bg.alpha = 0.5, #legend.text.size = 2, 
               outer.bg.color = 'white', frame = T,
               legend.text.color = 'white', legend.title.color= 'white', 
               # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
               # title= ras_nm, title.position = c('left', 'top'),
-              title = ras_nm, title.position = c(0, 0.95), title.size = 0.7,
-              legend.position= c("right", "bottom"), legend.just = 'bottom')
-  # domap
+              title = ras_nm, title.position = c(0, 0.9), title.size = 0.65,
+              legend.position= c(0.8, 0))
+  domap
   assign(map_nm, domap)
 }
 
@@ -184,23 +218,20 @@ domap_ls <- mget(ls(pattern = '^domap_2014'))
 # domaps <- tmap_arrange(domap_ls, ncol = 3, sync = T, outer.margins = 0)
 # domaps
 # tmap_save(domaps, filename="do_maps.png", height=8, width=7, units="in", dpi=300)
-```
-
-
-
 
 
 ### put maps on a panel - 1 cols
 
-```{r}
+
 source('./func_domap_1col.R')
-func_domap_1col(n_plots = 9, h = 3.2)
+# func_domap_1col(n_plots = 9, h = 3.2)
+func_domap_1col(n_plots = 9, h = 3.2/2)
 
 ```
 
 
 
-### put maps on a panel - 3 cols
+  put maps on a panel - 3 cols
 
 ```{r eval=FALSE, include=FALSE}
 library(grid)

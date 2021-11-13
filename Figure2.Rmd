@@ -54,9 +54,9 @@ acc0 <- err_rf %>%
 ### option 1. use mean, se OR sd,for plotting ----
 ###   `summarySE` provides the standard deviation, standard error of the mean, and a (default 95%) confidence interval
 library(Rmisc)
-rfErr <- summarySE(data = acc0, measurevar="value", groupvars=c("year", "nw", "errType")) %>%
-  dplyr::select(-year, -N) %>%
-  dplyr::rename(lag = nw)
+# rfErr <- summarySE(data = acc0, measurevar="value", groupvars=c("year", "nw", "errType")) %>%
+#   dplyr::select(-year, -N) %>%
+#   dplyr::rename(lag = nw)
 
 
 
@@ -72,6 +72,24 @@ rfErr <- acc0 %>%
                    iqr=IQR(value, na.rm = T)) %>%
   dplyr::mutate(withinSampErr = NA)
   
+
+## --> add within-sample-error (i.e., training accuracy) of RF model
+rfErr_training <- err_rf_train %>%
+  gather(key = 'errType', value = 'value', RMSE:R2) %>%
+  dplyr::mutate(errType = factor(errType, levels = c('R2', 'RMSE', 'MAE'))) %>%
+  dplyr::select(-year) %>%
+  dplyr::rename(lag = nw) %>%
+  group_by(lag, errType) %>%
+  dplyr::summarise(med = median(value, na.rm = T), ## median
+                   max = max(value, na.rm = T), 
+                   min = min(value, na.rm = T), 
+                   avg = mean(value, na.rm = T),
+                   iqr=IQR(value, na.rm = T)) %>%
+  as.data.frame()
+
+rfErr$withinSampErr <- rfErr_training$med
+
+
 
 
 ## 3. bind three data sets -------------------------------------------------------------------------
@@ -138,10 +156,9 @@ err_3models_bestday <- err_3models %>%
 
 ### 3. plot
 (p <- ggplot(data = err_3models, aes(x=lag, y=med))+
-    
     geom_line()+
-    geom_line(aes(y=withinSampErr),col='red')+
-    geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+    geom_line(aes(y=withinSampErr), col='red', alpha=0.8, linetype = 'dashed')+
+    geom_ribbon(aes(ymax=max,ymin=min), alpha=0.3)+
     scale_color_viridis() +
     
     ## --> To highlight the best data range for prediction  
@@ -152,14 +169,48 @@ err_3models_bestday <- err_3models %>%
       fill = 'blue', alpha=0.1) + 
     facet_grid(errType~mod, scales = 'free_y')+
     labs(x='Time lag', y='Model Accuracy') +
-    theme_bw()
+    theme_bw() +
+    theme(legend.position = c(0.06, 0.75))
 )
-
+library(lemon)
+reposition_legend(p, 'left')
 ggsave('./figures/outOfSamp_comparison_3models_new.png', p, width=7, height=5)
 ```
 
 
 
+```{r}
+## 1. the input data for plot
+err_3models_long <- err_3models %>%
+  gather(key = set, value = value, c(med, withinSampErr)) %>%
+  as.data.frame() %>%
+  dplyr::mutate(set = as.factor(set))
+
+err_3models_long$set = factor(x = err_3models_long$set, levels = c('med', 'withinSampErr'), labels = c('Testing', 'Training'))
+
+### 3. plot
+(p <- ggplot(data = err_3models_long, aes(x=lag, y=value))+
+    
+    geom_line(aes(color = set, linetype=set))+
+    scale_colour_manual(values = c('black', 'red')) +
+    # scale_
+    geom_ribbon(aes(ymax=max,ymin=min), alpha=0.3, show.legend = F)+
+    ## --> To highlight the best data range for prediction  
+    geom_rect(
+      data = data.frame(mod = factor(c('LLR', 'RFR'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-4,xmax=0, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.1, show.legend = F) + 
+    facet_grid(errType~mod, scales = 'free_y')+
+    labs(x='Time lag', y='Model Accuracy') +
+    theme_bw() +
+    theme(legend.position = c(0.93, 0.75),
+          legend.title = element_blank(),
+          legend.background = element_rect(fill='transparent'),
+          legend.box.background = element_rect(fill='transparent', color = 'transparent'))
+)
+
+ggsave('./figures/outOfSamp_comparison_3models_new2.png', p, width=7, height=5)
+```
 
 
 

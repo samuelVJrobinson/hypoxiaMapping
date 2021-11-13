@@ -7,11 +7,11 @@
 func_domap_1col <- function(n_plots, h) {  #@ the total number of plots
   
   fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_1col.png"); fname
-  png(filename = fname, pointsize = 12, width = 7/3, height = h/3*n_plots, units="in", res = 300)
+  png(filename = fname, pointsize = 12, width = 7/3, height = h/3*n_plots, units="in", res = 600)
   
   grid.newpage()
   pushViewport(viewport(layout = grid.layout(
-    nrow = n_plots+1, ncol = 1, heights = c(0.015, rep(0.99/n_plots, n_plots))
+    nrow = n_plots+1, ncol = 1, heights = c(0.025, rep(0.98/n_plots, n_plots))
   )))
   
   
