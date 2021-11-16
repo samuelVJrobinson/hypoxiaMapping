@@ -30,7 +30,8 @@ sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2
   mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>% 
   mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>% 
   select(-predPC1:-predPC6) %>% 
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j'))  #~10 seconds
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) %>% #~10 seconds
+  rename(imputed=gap)
 
 
 #Fit model of DO to gap-filled PCs ----------------------------------
