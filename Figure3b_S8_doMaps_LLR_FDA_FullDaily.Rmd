@@ -273,7 +273,7 @@ for (doy_id in doy_ls) {
 
 
 
-#  Plot
+#  Plot Area
 
 ## Plot dz area time series
 
@@ -350,7 +350,6 @@ ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in'
 
   FDA, LLR, RF
 ```{r}
-
 library(lubridate)
 
 ## --> create a time frame, in which put every 10 days as a slot
@@ -434,7 +433,31 @@ area_dz_10d %>%
   theme(legend.position = c(0.1, 0.85), panel.grid.minor = element_blank(), panel.grid.major.x = element_blank())
 fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1_facet.png'); fname
 ggsave(filename = fname, plot = last_plot(), width = 7, height = 3, units = 'in', dpi = 300)
+```
 
+
+### report the peak area in MS
+```{r}
+###
+
+summary(area_dz_10d$area)
+
+area_dz_10d_peak <- area_dz_10d %>%
+  dplyr::filter(date >= as.Date('2014-07-15'), date <= as.Date('2014-08-15')) 
+
+
+x <- area_dz_10d_peak$area
+x[!x %in% boxplot.stats(x)$out]
+
+area_dz_10d_peak_sm <- area_dz_10d_peak %>%
+  arrange(model, desc(area)) %>%
+  group_by(model) %>%
+  dplyr::summarise(mean = mean(area, na.rm = T), 
+                   # median = median(area, na.rm = T), 
+                   max = max(area, na.rm = T))
+area_dz_10d_peak_sm
+
+mean(area_dz_10d_peak_sm$max)
 ```
 
 
@@ -623,26 +646,31 @@ for (i in 1:length(ras_ls)) {
                 # title.position = c('left', 'bottom'), 
                 legend.position= c("right", "bottom"))
     
-    ## --> print the lengend on the 2nd blank map --------------------- #
-  } else if (counter == 2) {
-    domap <- tm_shape(dz, bbox = bhu_bb) +
-      tm_raster(style = "fixed", 
-                # style = "cont",
-                title = "DO (mg/l)",
-                breaks = seq(0, 8, 2),
-                palette = brewer.pal(9,"RdYlBu"), legend.show = 1) +
-      tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
-      tm_layout(bg.color = 'black', legend.height = 2, legend.bg.alpha = 0.8, 
-                legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
-                legend.text.color = 'white', legend.title.color= 'white',
-                # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
-                title = ras_nm, legend.only = T,
-                # title.position = c('left', 'bottom'), 
-                title.position = c(0, 0.9), title.size = 0.7,
-                legend.position= c(0.4, 0))
     
-  } else {
-    ## --> print blank maps ------------------------------------------ #
+  } 
+  
+  ## --> print the legend on the 2nd blank map --------------------- #
+  # else if (counter == 2) {
+  #   domap <- tm_shape(dz, bbox = bhu_bb) +
+  #     tm_raster(style = "fixed", 
+  #               # style = "cont",
+  #               title = "DO (mg/l)",
+  #               breaks = seq(0, 8, 2),
+  #               palette = brewer.pal(9,"RdYlBu"), legend.show = 1) +
+  #     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+  #     tm_layout(bg.color = 'black', legend.height = 2, legend.bg.alpha = 0.8, 
+  #               legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+  #               legend.text.color = 'white', legend.title.color= 'white',
+  #               # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+  #               title = ras_nm, legend.only = T,
+  #               # title.position = c('left', 'bottom'), 
+  #               title.position = c(0, 0.9), title.size = 0.7,
+  #               legend.position= c(0.4, 0))
+  #   
+  # } 
+  
+  ## --> print blank maps ------------------------------------------ #
+  else {
     domap <- plot.new() # plot(1, type = "n", xlab = "", ylab = "", xlim = c(0, 5), ylim = c(0, 5))
   }
   assign(map_nm, domap)

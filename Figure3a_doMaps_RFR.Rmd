@@ -18,9 +18,11 @@ library(raster)
 
 library(tmap)
 library(sf)
+library(grid)
 
 library(tidyverse)
 library(viridis)
+library(RColorBrewer)
 ```
 
 
@@ -176,7 +178,7 @@ domap
 ras_ls <- list.files(path = dir.do.tif, pattern = '^do_map_2014', full.names = T); ras_ls
 
 bg_color = '#4575B4' ## blue, same as the 'sea'
-bg_color = 'gray50'  ## gray, as NA
+bg_color = 'gray10'  ## gray, as NA
 
 counter = 0
 for (ras in ras_ls) {
@@ -196,9 +198,9 @@ for (ras in ras_ls) {
 
   domap <-
     tm_shape(dz, bbox = bhu_bb3) +
-    tm_raster(style = "fixed", title = "DO (mg/l)",
+    tm_raster(style = "fixed", title = "DO (mg/l)", showNA = T, colorNA = bg_color, textNA = "NA",
               breaks = seq(0, 8, 2), legend.reverse = F, legend.is.portrait = T,
-              palette = brewer.pal(9,"RdYlBu"), legend.show = yes_or_no) +
+              palette = brewer.pal(9,"RdYlBu"), legend.show = 0) +  ## legend.show = yes_or_no
     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
     tm_layout(bg.color = bg_color, legend.height = 1, #legend.width = .3, #legend.text.size = 1.5, legend.title.size = 1.5, 
               legend.bg.color = 'black', legend.bg.alpha = 0.5, #legend.text.size = 2, 
@@ -226,6 +228,39 @@ domap_ls <- mget(ls(pattern = '^domap_2014'))
 source('./func_domap_1col.R')
 # func_domap_1col(n_plots = 9, h = 3.2)
 func_domap_1col(n_plots = 9, h = 3.2/2)
+```
+
+
+```{r - Legend}
+ras <- paste0(dir.do.tif, 'do_map_20140601.tif'); ras
+dz  <- raster(ras) 
+
+domap <-
+    tm_shape(dz, bbox = bhu_bb3) +
+    tm_raster(style = "fixed", title = "DO (mg/l)", showNA = T, colorNA = bg_color, textNA = "NA",
+              breaks = seq(0, 8, 2), legend.reverse = F, legend.is.portrait = T,
+              palette = brewer.pal(9,"RdYlBu"), legend.show = 1) +
+    tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+    tm_layout(bg.color = bg_color, legend.height = 1, #legend.width = .3, #legend.text.size = 1.5, legend.title.size = 1.5, 
+              legend.bg.color = 'black', legend.bg.alpha = 0.5, #legend.text.size = 2, 
+              outer.bg.color = 'white', frame = T,
+              legend.text.color = 'white', legend.title.color= 'white', 
+              # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+              # title= ras_nm, title.position = c('left', 'top'),
+              title = ras_nm, title.position = c(0, 0.9), title.size = 0.65,
+              legend.position= c(0.8, 0))
+
+
+(map_legend <- domap + 
+  tm_layout(legend.only = T, 
+            # legend.text.size = 10, 
+            # legend.title.size = 11,
+            legend.position= c(0, 0),
+            legend.bg.color = NA, 
+            legend.text.color = 'black', 
+            legend.title.color= 'black'))
+fname <- paste0("./figures/do_maps_", "legend.png"); fname
+tmap_save(map_legend, filename=fname, height=3, width=3, units="in", dpi=300)
 
 ```
 

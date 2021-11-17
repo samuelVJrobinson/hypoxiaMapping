@@ -87,12 +87,13 @@ rfErr_training <- err_rf_train %>%
                    iqr=IQR(value, na.rm = T)) %>%
   as.data.frame()
 
+## --> final RF 
 rfErr$withinSampErr <- rfErr_training$med
 
 
 
 
-## 3. bind three data sets -------------------------------------------------------------------------
+## 3. fix and unify the data frame format ----------------------------------------------------------
 
 names(fdaErr)
 names(llModErr)
@@ -117,7 +118,29 @@ fdaErr <- fdaErr %>%
 ```
 
 
+## Table 1 - result summary
+```{r}
+names(rfErr)
 
+
+### for training data set
+rfErr_training %>% 
+  ungroup() %>%
+  dplyr::filter(lag < 5) %>%
+  group_by(errType) %>%
+  # dplyr::summarise() %>%
+  arrange(errType, med) %>%
+  as.data.frame()
+
+### for testing data set
+rfErr %>% 
+  ungroup() %>%
+  dplyr::filter(lag < 5) %>%
+  group_by(errType) %>%
+  # dplyr::summarise() %>%
+  arrange(errType, med) %>%
+  as.data.frame()
+```
 
 
 

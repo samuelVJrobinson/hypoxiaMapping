@@ -56,8 +56,8 @@ head(LLmapDatFull)
 ```{r}
 
 ## --> 1st to choos -----------------------> 
-dat <- FRmapDat; which_dat <- 'FR'
-# dat <- LLmapDat; which_dat <- 'LL'
+# dat <- FRmapDat; which_dat <- 'FR'
+dat <- LLmapDat; which_dat <- 'LL'
 
 
 ## --> 2nd to choose ---------------------->
@@ -203,7 +203,7 @@ bhu_bb3
 
 
 # bg_color = '#4575B4' ## blue, same as the 'sea'
-bg_color = 'gray50'  ## gray, as NA
+bg_color = 'gray10'  ## gray, as NA
 
 
 ### loop and plot the DO raster
