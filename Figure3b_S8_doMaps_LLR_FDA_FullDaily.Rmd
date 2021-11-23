@@ -299,7 +299,7 @@ ggplot(area_dz_rf, aes(x = date, y = area)) +
   theme_bw()
 
 fname <- paste0('./figures/', 'area_dz_overTime_RF.png'); fname
-ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in', dpi = 300)
+# ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in', dpi = 300)
 
 
 
@@ -332,7 +332,7 @@ area_dz %>%
 
 area_dz %>%
   rbind(area_dz_rf) %>%
-  ggplot(aes(x = date, y = area, color = model)) +
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
   geom_point() +
   geom_smooth(method = 'loess', formula = 'y~x') +
   ylab('Area (sq km)')+ xlab('Date') +
@@ -346,11 +346,13 @@ ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in'
 
 
 
-## Plot agg data
+## Plot agg data 
 
   FDA, LLR, RF
-```{r}
+  
+```{r - Fig 3b}
 library(lubridate)
+model_fullname <- c('Lagged Linear Regression', 'Random Forest Regression', 'Functional Data Analysis')
 
 ## --> create a time frame, in which put every 10 days as a slot
 ds <- data.frame(date = seq(as.Date("2014-05-01"), as.Date("2014-09-01"), by="days")) %>%
@@ -416,6 +418,7 @@ ggsave(filename = fname, plot = last_plot(), width = 7, height = 6, units = 'in'
 
 ## - plot 2 - only 6/1 - 9/1 -- facet
 area_dz_10d %>%
+  dplyr::mutate(model = factor(model, levels = c('LLR', 'RFR', 'FDA'), labels = model_fullname)) %>%
   # dplyr::filter(date >= as.Date('2014-05-20'), date <= as.Date('2014-09-03')) %>%
   ggplot(aes(x = date, y = area, color = model, fill = model)) +
   geom_point(show.legend = F, size = 1) +
@@ -430,14 +433,16 @@ area_dz_10d %>%
   # ylim(-3000, NA) +
   theme_bw() +
   labs(fill = 'Models', color = 'Models') +
-  theme(legend.position = c(0.1, 0.85), panel.grid.minor = element_blank(), panel.grid.major.x = element_blank())
+  theme(legend.position = c(0.1, 0.85), 
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank(), panel.grid.major.x = element_blank())
 fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1_facet.png'); fname
 ggsave(filename = fname, plot = last_plot(), width = 7, height = 3, units = 'in', dpi = 300)
 ```
 
 
-### report the peak area in MS
-```{r}
+
+```{r - report the peak area in MS}
 ###
 
 summary(area_dz_10d$area)
@@ -454,10 +459,18 @@ area_dz_10d_peak_sm <- area_dz_10d_peak %>%
   group_by(model) %>%
   dplyr::summarise(mean = mean(area, na.rm = T), 
                    # median = median(area, na.rm = T), 
-                   max = max(area, na.rm = T))
+                   max = max(area, na.rm = T)) %>%
+  as.data.frame()
+
 area_dz_10d_peak_sm
 
-mean(area_dz_10d_peak_sm$max)
+mean(area_dz_10d_peak$area)
+sd(area_dz_10d_peak$area)
+std <- function(x) sd(x)/sqrt(length(x))
+std(area_dz_10d_peak$area)
+
+library(psych)
+psych::describeBy(area_dz_10d_peak %>% dplyr::select(-date), group="model", mat = T, digits = 2)
 ```
 
 

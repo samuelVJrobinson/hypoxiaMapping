@@ -11,17 +11,20 @@ func_domap_1col <- function(n_plots, h) {  #@ the total number of plots
   
   grid.newpage()
   pushViewport(viewport(layout = grid.layout(
-    nrow = n_plots+1, ncol = 1, heights = c(0.025, rep(0.98/n_plots, n_plots))
+    nrow = n_plots+1, ncol = 1, heights = c(0.03, rep(0.98/n_plots, n_plots))
   )))
   
   
   if (which_dat == 'FR') {
-    text_header <- 'FDA'
+    text_header <- 'Functional Data Analysis'
+  } else if (which_dat == 'LL') {
+    # text_header <- paste0(which_dat, 'R')
+    text_header <- 'Lagged Linear Regression'
   } else {
-    text_header <- paste0(which_dat, 'R')
+    text_header <- 'Random Forest Regression'
   }
   
-  grid.text(label = text_header, vp = viewport(layout.pos.row = 1), gp = gpar(fontsize = 10, fontface = "bold"))
+  grid.text(label = text_header, vp = viewport(layout.pos.row = 1), gp = gpar(fontsize = 9, fontface = "bold"))
   
   z = 0
   for (i in 1:n_plots) {
