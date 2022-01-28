@@ -257,6 +257,8 @@ fdat <- list(DO_bottom=bottomWDat$DO,
              sE=bottomWDat$sE,sN=bottomWDat$sN,
              maxDepth=bottomWDat$maxDepth)
 
+save(fdat,file='./data/FRdat.Rdata')
+
 basisType <- 'cr' #Cubic regression splines
 #Fit FDA models 
 bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+s(dayMat,by=pcaMat2,bs=basisType)+
