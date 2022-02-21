@@ -36,7 +36,7 @@ which_dat <- "RF"
 which_do  <- "meanDO"
   
 ## data path
-dir.do.tif <- '../Dead_Zone_telecoupling/data/data_from_gee/predict_do_maps_lag10d/'
+dir.do.tif <- '../Dead_Zone_telecoupling/data/data_paper1/data_from_gee/predict_do_maps_lag10d/'
 
 
 ## raster
@@ -85,7 +85,7 @@ riv <- st_read(rivers) %>%
   st_as_sf() %>%
   dplyr::select(name)
 
-shp <- 'D:/data/NaturalEarthData/ne_50m_admin_1_states_provinces/ne_50m_admin_1_states_provinces.shp'
+shp <- 'D:/data/shp/NaturalEarthData/ne_50m_admin_1_states_provinces/ne_50m_admin_1_states_provinces.shp'
 usa <- sf::st_read(shp) %>%
   st_as_sf() %>%
   dplyr::filter(adm0_a3 == 'USA') %>%
