@@ -1,0 +1,800 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+
+
+# Set up
+
+```{r Packages and Dirs, include=FALSE}
+# To clear your environment 
+remove(list = ls())
+
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(proj4)
+library(stringr)
+library(scales)
+library(lubridate)
+
+## data describe 
+library(summarytools)
+
+library(sf)
+library(maps)
+library(mapdata)
+
+library(RColorBrewer)
+library(viridis)
+# devtools::install_github("jaredhuling/jcolors")
+library(jcolors)
+
+
+
+### Set work dir -------------------------------------------------------------------------
+path <- rstudioapi::getSourceEditorContext()$path
+dir  <- dirname(rstudioapi::getSourceEditorContext()$path); dir
+dirname(dir)        ## go to parent dir
+setwd(dirname(dir)) ## set this parent dir as root dir
+getwd()
+
+### the data fir 
+dir.band    <- './data/data_from_gee/'
+dir.fig     <- paste0(dirname(dir), '/figures/'); dir.fig
+dir.cleaned <- paste0(dir.band, 'Img2Table_cleaned/'); dir.cleaned
+
+
+## keep more decimals 
+options(digits = 15)
+options(pillar.sigfig = 15)
+
+### Disable Scientific Notation in R
+options(scipen = 999) # Modify global options in R
+
+# today <- format(Sys.time(), "%Y%m%d"); print(today)
+```
+
+
+
+# Data
+## Clean data
+
+  loop read in csv of aqua and terr data
+  
+```{r loop read in csv, eval=FALSE, include=FALSE}
+
+### 1. loop-aqua -----------------------------------------------------------------------------------
+# files <- list.files(path = paste0(dir.band, 'Img2Table_04_2021-03-18/'), pattern = 'aqua', full.names = T); #files
+### --> update data after resolution change; on 9/11/2021
+files <- list.files(path = paste0(dir.band, 'Img2Table_04_2021-09_4km/'), pattern = 'aqua', full.names = T); files
+print(paste0('Number of files: ', length(files))) ## (2019-2005+1)*14 = 210
+
+ds <- data.frame()
+
+for (file in files) {
+  yr <- as.numeric(substr(basename(file), 1, 4)); yr
+  sensor <- substr(basename(file), 6, 9); sensor
+  band <- str_sub(basename(file), start = 11); band
+  band <- gsub('.csv', '', band); band
+  
+  d1 <- read_csv(file = file)
+  names(d1)
+  d2 <- d1 %>%
+    dplyr::mutate(band = band) %>%
+    dplyr::select(YEID, featureID, band, 2:Date) %>%
+    dplyr::select(-Date)
+  d3 <- d2 %>%
+    gather(key = 'date_img', value = 'rs', 4:ncol(.)) %>%
+    dplyr::mutate(rs = as.numeric(rs)) 
+  ds <- rbind(ds, d3)
+}
+
+# dfSummary(ds)
+ds_aqua <- ds
+
+
+### double-check the data - there are fewer data from Terr than Aqua
+ds_aqua_count <- ds_aqua %>%
+  dplyr::mutate(year = year(date_img)) %>%
+  group_by(year, band) %>%
+  tally() %>%
+  dplyr::mutate(n_location = n/214) ## 214 days
+ds_aqua_count %>% distinct(year, n_location)
+# ds_aqua_count_daysPerYear <- ds_aqua %>%
+#   dplyr::mutate(year = year(date_img)) %>%
+#   group_by(YEID, year, band) %>%
+#   tally()
+
+
+
+
+
+### 2. loop-terr -----------------------------------------------------------------------------------
+# files <- list.files(path = paste0(dir.band, 'Img2Table_04_2021-03-18/'), pattern = 'terr', full.names = T); #files
+
+### --> update data after resolution change; on 9/11/2021
+files <- list.files(path = paste0(dir.band, 'Img2Table_04_2021-09_4km/'), pattern = 'terr', full.names = T); files
+print(paste0('Number of files: ', length(files)))
+
+ds <- data.frame()
+
+for (file in files) {
+  yr <- as.numeric(substr(basename(file), 1, 4)); yr
+  sensor <- substr(basename(file), 6, 9); sensor
+  band <- str_sub(basename(file), start = 11); band
+  band <- gsub('.csv', '', band); band
+  
+  d1 <- read_csv(file = file)
+  names(d1)
+  d2 <- d1 %>%
+    dplyr::mutate(band = band) %>%
+    dplyr::select(YEID, featureID, band, 2:Date) %>%
+    dplyr::select(-Date)
+  d3 <- d2 %>%
+    gather(key = 'date_img', value = 'rs', 4:ncol(.)) %>%
+    dplyr::mutate(rs = as.numeric(rs))  
+  ds <- rbind(ds, d3)
+}
+
+# dfSummary(ds)
+ds_terr <- ds
+names(ds)
+
+
+### double-check the data - there are fewer data from Terr than Aqua
+ds_terr_count <- ds_terr %>%
+  dplyr::mutate(year = year(date_img)) %>%
+  group_by(year, band) %>%
+  tally() %>%
+  dplyr::mutate(n_location = n/214) ## 214 days
+  
+ds_terr_count %>% distinct(year, n_location)
+```
+
+
+
+
+```{r join 2 sensors, eval=FALSE, include=FALSE}
+### merge the 2 sensors ----------------------------------------------------------------------------
+ds_2sensor <- merge(x = ds_aqua, y = ds_terr, by = c("YEID", "featureID", "band", "date_img")) 
+names(ds_2sensor)
+names(ds_2sensor) <- c( "YEID", "featureID", "band", "date_img", "aqua", "terr")
+head(ds_2sensor)
+
+
+### check the variation of two data source
+ds_2sensor_check <- ds_2sensor %>%
+  dplyr::mutate(dif = aqua - terr) #%>%  arrange(dif)
+
+# dfSummary(ds_2sensor_check)
+hist(ds_2sensor_check$dif)
+
+
+
+## scatter plot to compare the 2 sensors -----------------------------------------------------------
+library(ggpmisc)
+my.formula <- y ~ x
+# ggplot(ds_2sensor, aes(x = aqua, y = terr)) +
+#   geom_point(alpha = 0.2) +
+#   facet_wrap(~band, scales = 'free') +
+#   geom_smooth(method = 'lm', na.rm = T, formula = my.formula) +
+#   stat_poly_eq(formula = my.formula, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) +
+#   theme_bw()
+# fname <- paste0(dir.fig, 'band_correlation_auqa_terr.jpg'); fname
+# ggsave(fname, last_plot(), width = 16, height = 9, dpi = 300, units = 'in')
+
+
+
+### take the average value of `aqua` and `terr` as the composite pixel value? -----------------------------
+### ---> ??? perhaps need to examine if this will cause problems, 
+###    as I see the two differ from each other a lot at some locations.
+ds_2sensor_composite <- transform(ds_2sensor, pixel = rowMeans(ds_2sensor[,5:6], na.rm = TRUE)) %>%
+  dplyr::select(-aqua, -terr, -featureID) %>%
+  spread(key = band, value = pixel) %>%
+  as.data.frame()
+
+
+
+### save data (if all years are included) ----------------------------------------------------------
+dirname(dir)
+# fname <- paste0(dir.cleaned, 'sample_2005-2019_ImageBandValue_at_SamplingLocations.RData'); fname
+# save(ds_2sensor, ds_2sensor_composite, file = fname)
+# fname <- paste0(dir.cleaned, 'sample_2005-2019_ImageBandValue_at_SamplingLocations.xlsx'); fname
+# writexl::write_xlsx(x = ds_2sensor_composite, path = fname)
+
+
+
+
+### save data (if only 2014) -----------------------------------------------------------------------
+ds_2sensor_composite_2014 <- ds_2sensor_composite %>%
+  dplyr::filter(nchar(YEID) < 10)
+fname <- paste0(dirname(dir), '/data/data_for_gee/_for_sam/sample_2014_ImageBandValue_at_SamplingLocations_0910.xlsx'); fname
+writexl::write_xlsx(x = ds_2sensor_composite_2014, path = fname)
+```
+
+
+
+
+## Merge RS - DO sampling info
+
+  To link RS with sampling location and sampling date info, and then use this `df_merge` to filter RS data 1-week, 2-week, ..., n-week before the DO sampling. 
+
+```{r - RS data}
+### 1. load RS data ----------------------------------------------------------------------
+### 1.1 the data used earlier
+fname <- paste0(dir.cleaned, 'sample_2005-2019_ImageBandValue_at_SamplingLocations.RData'); fname
+load(fname)
+df_rs_old <- ds_2sensor_composite
+
+
+### 1.2 need to update the data --> the above data was based on data from `Img2Table_04_2021-03-18`, which extracted pixel values at 500m resolution, which is not correct. Need to use the most updated new data
+f <- list.files(path = dirname(getwd()), pattern = "^rs_sample_combined_2000_2019.RData", full.names = T, recursive = T)
+f
+if(length(f) > 1) {
+  break  ## if there are two or more files found, report error. If only one, then go on. 
+} else {
+  fname <- f; #fname
+}
+load(file = fname) # load the new data `df_rs`
+df_rs_new <- df_rs 
+
+
+### 1.3 need to use the same variables used in earlier analysis
+names(df_rs_old)
+names(df_rs_new)
+
+df_rs <- df_rs_new %>%
+  dplyr::select(names(df_rs_old))
+
+### remove a few specific objects from the work space - won't be used in the following sections
+rm(df_rs_new, df_rs_old, ds_2sensor, ds_2sensor_composite)
+```
+
+
+
+
+
+
+```{r - DO data - clean duplicated points, paged.print=FALSE}
+### 2. load DO data  ---------------------------------------------------------------------
+
+### --> 2.1 used in earlier analysis, with 79 samples for 2019
+# f <- paste0('./data/data_for_gee/_for_sam/', 'sample_2014_DO.xlsx')
+# f <- paste0('./data/data_for_gee/',          'sample_2000_2019_DO.xlsx'); f
+# df_do <- readxl::read_excel(path = f)
+
+
+
+### --> 2.2 updated data for 2019
+f <- list.files(path = dirname(getwd()), pattern = "^sample_2000_2019_do_bottom\\.xlsx$", full.names = T, recursive = T)
+f
+if(length(f) > 1) {
+  break  ## if there are two or more files found, report error. If only one, then go on. 
+} else {
+  fname <- f; #fname
+}
+df_do_new <- readxl::read_excel(path = f)
+
+
+df_do <- df_do_new
+
+
+### to remove duplicated points ------------------------------------
+df_do1 <- df_do %>%
+  as.data.frame() %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct(YEID, Date, .keep_all = T) %>%
+  dplyr::mutate(lat1 = round(lat, digits = 4), lon1 = round(lon, digits = 4), len = nchar(YEID)) %>%
+  dplyr::group_by(Year) %>%
+  arrange(Date, Source, len) %>%
+  dplyr::distinct(Date, Source, lat1, lon1, .keep_all = T) %>%
+  ## check on one year
+  # dplyr::filter(Year == 2014) %>% 
+  
+  dplyr::select(-lat1, -lon1, -len) %>%
+  as.data.frame()
+
+### for the DO data, to extract the unique location and the sampling date
+### - usually, there is only one date for one location 
+df_sample_info <- df_do1 %>%
+  dplyr::distinct(YEID, Date, .keep_all = F)
+
+
+### - how many samples in each month in each year?
+df_do_npoint_month <- df_sample_info %>%
+  dplyr::mutate(yy = year(Date),
+                mm = month(Date),
+                dd = day(Date),
+                time = as.Date(paste('2000', mm, dd, sep = '-'))) %>%
+  ungroup() %>%
+  group_by(yy, mm) %>%
+  tally()
+
+df_do_npoint_yr <- df_sample_info %>%
+  dplyr::mutate(yy = year(Date),
+                mm = month(Date),
+                dd = day(Date),
+                time = as.Date(paste('2000', mm, dd, sep = '-'))) %>%
+  ungroup() %>%
+  dplyr::group_by(yy) %>%
+  tally()
+df_do_npoint_yr
+
+### - there are samples took in month of 10 and 11. to keep constancy, we remove these samples
+df_do_unique <- df_sample_info %>%
+  dplyr::mutate(yy = year(Date),
+                mm = month(Date))%>%
+  dplyr::filter(mm <=9) %>%
+  dplyr::select(-yy, -mm) %>%
+  arrange(YEID)
+```
+
+
+
+```{r ------ shp for testing, eval=FALSE, include=FALSE}
+
+### join DO table and spectrum table ---------------
+f <- df_do_new %>%
+  dplyr::distinct(YEID, Date, .keep_all = T) %>%
+  dplyr::mutate(yy = year(Date),
+                mm = month(Date))%>%
+  dplyr::filter(mm <=9) %>%
+  arrange(!is.na(yy)) %>%
+  dplyr::select(-yy, -mm) 
+  
+
+
+### convert to .shp --------------------------------
+projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+f_shp <- st_as_sf(x = f, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+
+### write to .shp
+shp_name <- paste0('TEST2_sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_', 
+                   nw, prefix, '', '.shp');  print(shp_name)
+shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+```
+
+
+
+
+```{r - DO-RS merge}
+### 3. Join spectrum data and DO data by id ----------------------------------------------
+###     use the sampling location and date info to composite the "n-week before" spectrum data for each location
+df_merge <- merge(x = df_rs, y = df_do_unique, by = 'YEID', all.y = T) %>% ## the `df_rs` is not clean regarding overlapped points 
+  dplyr::mutate(Date = as.Date(Date), date_img = as.Date(date_img)) %>%
+  dplyr::select(YEID, Date, date_img, everything()) %>%
+  arrange(YEID, Date, date_img)
+# str(df_merge)
+```
+
+
+
+  
+```{r - Data description}
+names(df_merge)
+cat('\nHow many samples in each year?')
+df_merge %>% 
+  dplyr::mutate(yy = year(Date)) %>%
+  distinct(YEID, yy) %>%
+  group_by(yy) %>% tally()
+
+cat('\nHow many days of RS data are attached to each sample location?')
+df_merge %>% 
+  dplyr::mutate(yy = year(Date)) %>%
+  group_by(YEID, yy) %>% tally()
+```
+
+
+## Link DO-RS by date lags
+
+  *Test time-lag*
+  
+```{r eval=FALSE, include=FALSE}
+
+### '1-week before' image. Range: [t0 - 7*1+1] ~ [t0 - 7*(1-1)]   ---------------------------------------
+nw <- 1
+df_merge_1w <- df_merge %>%
+  ungroup() %>%
+  # group_by(YEID) %>%
+  dplyr::mutate(year = year(Date)) %>%
+  group_by(YEID, year) %>%
+  ### test -------------------------
+  # dplyr::filter(YEID == '2014_003') %>%
+  # dplyr::filter(year == 2008) %>% ## this line is for testing only
+  ### ------------------------------  
+  dplyr::filter(date_img >= (Date - 7*nw + 1),
+                date_img <= (Date - 7*(nw - 1))) %>%
+  dplyr::mutate(n_day_ago = Date - date_img,
+                n_day_ago = as.numeric(n_day_ago)) %>%
+  dplyr::select(YEID, Date, date_img, n_day_ago, everything())
+# str(df_merge_1w)
+
+### - how many sampling locations are included for each year in the data?
+df_merge_1w %>%
+  dplyr::mutate(year = year(Date)) %>%
+  ungroup() %>%
+  group_by(year) %>%
+  tally() %>%
+  dplyr::mutate(nn = n/7)
+  
+
+
+### - availability in the 1-week period
+# colSums(is.na(df_merge_1w)) ### this is a way to do so
+df_merge_1w_naCount <- df_merge_1w %>%
+  ungroup() %>%
+  dplyr::select(-Date, -date_img, -n_day_ago, -year) %>%
+  group_by(YEID) %>%
+  summarise_all(funs(sum(!is.na(.))))
+
+### plot the data distribution
+# df_merge_1w_naCount %>%
+#   gather(key = 'band', value = 'count', 2:ncol(.)) %>%
+#   ggplot(aes(x = band, y = count/7*100, color = band)) +
+#   geom_violin(trim = FALSE)+
+#   geom_jitter(position=position_jitter(0.05), alpha = 0.2, aes(fill = band)) +
+#   geom_boxplot(width=.15, color = 'black', fill = NA, size = 0.1) +
+#   facet_wrap(~band, scales = 'free') +
+#   theme_bw() +
+#   ylab('% of days in a week has data') +
+#   theme(legend.position="none")# Remove legend
+# fname <- paste0(dir.fig, 'band_percent of days in a week has data.jpg'); fname
+# ggsave(fname, last_plot(), width = 16, height = 9, dpi = 300, units = 'in')
+
+
+
+
+### composite the 1-week long image ---------------------------------------------------------------------------
+df_merge_1w_comp <- df_merge_1w %>%
+  ungroup() %>%
+  dplyr::select(-Date, -date_img, -n_day_ago) %>%
+  group_by(YEID) %>%
+  summarise_all(list(mean), na.rm = TRUE)
+
+### - the 1-week composite data in 2014
+df_merge_1w_comp2014 <- df_merge_1w_comp %>%
+  dplyr::filter(str_starts(string = YEID, pattern = '2014'))
+```
+
+
+
+
+  Loop 1-week, 2-week, ..., 8-week before, and 
+  - save data in each time-lagas separate xlsx file
+  - save data in each year as separate xlsx file. 
+  
+```{r - Loop 1-8 week}
+### put the averaged spectrum data 1-week and n-week before in one table -----------------
+
+interval <- 7  ## every one week as the time lag unit
+interval <- 10 ## every 10 days  as the time lag unit
+
+yrmin <- min(year(df_merge$Date), na.rm = T)
+yrmax <- max(year(df_merge$Date), na.rm = T)
+
+df_merge_nw_comps <- data.frame()
+
+for (nw in seq(1,8)) {
+  # print(nw)
+  
+  df_merge_nw <- df_merge %>%
+    ungroup() %>%
+    # group_by(YEID) %>%
+    dplyr::mutate(year = year(Date)) %>%
+    group_by(YEID, year) %>%
+    dplyr::filter(date_img >= (Date - interval*nw + 1),
+                  date_img <= (Date - interval*(nw - 1))) %>%
+    dplyr::mutate(n_day_ago = Date - date_img,
+                  n_day_ago = as.numeric(n_day_ago)) %>%
+    dplyr::select(YEID, Date, date_img, n_day_ago, everything())
+  
+  ### calculate the mean of auqa and terr for each DO sampling location 
+  df_merge_nw_comp <- df_merge_nw %>%
+    ungroup() %>%
+    dplyr::select(-Date, -date_img, -n_day_ago) %>%
+    group_by(YEID, year) %>%
+    summarise_all(list(mean), na.rm = TRUE)
+  
+  ### save as xlsx --------------------------
+  fname <- paste0(dir.cleaned, 'by_timelag/sample_', yrmin, 'to', yrmax, '_ImageBandValue_at_SamplingLocations_', 
+                  nw, '_', interval, 'DaysBefore', '.xlsx'); 
+  print(fname)
+  writexl::write_xlsx(x = cbind(nweek_before = nw, df_merge_nw_comp), path = fname)
+  
+  ### bind to a combined large table --------
+  df_merge_nw_comps <- rbind(df_merge_nw_comps, 
+                             cbind(nweek_before = nw, df_merge_nw_comp))
+}
+```
+
+
+
+
+```{r - Loop by year - 2014 only}
+### loop years, and save data in each year as separate xlsx file ----------------------------------------------
+for (yr in 2014:2014) {
+  # print(yr)
+  df_yr <- df_merge %>%
+    ungroup() %>%
+    dplyr::mutate(year = year(Date)) %>%
+    dplyr::filter(year == yr)
+  print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
+
+  fname <- paste0(dir.cleaned, 'by_year/sample_', yr, '_ImageBandValue_at_SamplingLocations.xlsx'); 
+  print(fname)
+  writexl::write_xlsx(x = df_yr, path = fname)
+}
+```
+
+
+
+
+```{r - Loop by year - 2014 for Sam}
+### data for Sam
+yr <- 2014 
+
+df_yr <- df_merge %>%
+  ungroup() %>%
+  dplyr::mutate(year = year(Date)) %>%
+  dplyr::filter(year == yr) %>%
+  dplyr::select(-Date, -year)
+
+print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
+
+# fname <- './data/sample_spectralData3.xlsx'
+# writexl::write_xlsx(x = df_yr, path = fname)
+
+fname <- './data/sample_spectralData3.csv'
+readr::write_csv(x = df_yr, file = fname)
+```
+
+
+
+
+  Per request by the RSE reviewer, we expanded the lags from 0-30 days to 0-60 days.
+```{r - Loop 0-90 days, include=FALSE}
+
+# for (nw in seq(0 ,30)) {
+for (nw in seq(0,90)) {
+  # print(nw)
+  
+  df_merge_nw <- df_merge %>%
+    ungroup() %>%
+    # group_by(YEID) %>%
+    dplyr::mutate(year = year(Date)) %>%
+    group_by(YEID, year) %>%
+    dplyr::filter(date_img == Date - nw) %>%
+    dplyr::mutate(n_day_ago = Date - date_img,
+                  n_day_ago = as.numeric(n_day_ago)) %>%
+    dplyr::select(YEID, Date, date_img, n_day_ago, everything())
+  
+  df_merge_nw_comp <- df_merge_nw %>%
+    ungroup() %>%
+    dplyr::select(-Date, -date_img, -n_day_ago) %>%
+    group_by(YEID, year) %>%
+    summarise_all(list(mean), na.rm = TRUE)
+  
+  ### save as xlsx --------------------------
+  fname <- paste0(dir.cleaned, 'by_timelag_byDay/sample_', yrmin, 'to', yrmax, '_ImageBandValue_at_SamplingLocations_', 
+                  nw, '_dayBefore', '.xlsx'); 
+  print(fname)
+  writexl::write_xlsx(x = cbind(nweek_before = nw, df_merge_nw_comp), path = fname)
+}
+
+
+```
+
+
+  Check the data - number of sampling locations.
+  
+  To see if the new derived data are the same as the data derived on 2021-09-10. 
+    - Yes, they are identical. 
+    
+```{r eval=FALSE, include=FALSE}
+t1 <- paste0(dir.cleaned, 'by_year/',
+             'sample_', 2014, '_ImageBandValue_at_SamplingLocations.xlsx')
+t1df <- readxl::read_excel(t1) %>%
+  dplyr::filter(nchar(YEID) < 12) %>%
+  dplyr::select(-Date, -year) %>%
+  distinct(YEID, .keep_all = T)
+
+t2 <- paste0('./data/data_for_gee/_for_sam/', 
+             'sample_', 2014, '_ImageBandValue_at_SamplingLocations_20210910.xlsx'); #fname
+t2df <- readxl::read_excel(t2) %>%
+  dplyr::filter(nchar(YEID) < 12)%>%
+  distinct(YEID, .keep_all = T)
+```
+
+
+
+
+
+
+
+## Link RS with DO
+
+  - The *xlsx data* will be used in *`R`* script to explore the relationship between `DO` and `spectrum bands`. 
+  - The *shp data*  will be uploaded to GEE to train RF model for classification/regression. 
+
+  
+```{r DO input, paged.print=FALSE}
+### 1. DO data with sampling date --------------------------------------------------------
+
+### 1.1. if choosing the 'min DO' in the profile
+# whichDO <- 'DO_min'
+# df_do_min    <- readxl::read_excel(path = paste0('./data/data_for_gee/', 'sample_2000_2019_DO_min.xlsx')) %>%
+#   dplyr::mutate(Date = as.Date(Date))
+
+
+
+### 1.2. if choosing the 'do_10m' in the profile
+# whichDO <- 'Do_10m'
+# df_do_10m <- readxl::read_excel(path = paste0('./data/data_for_gee/', 'sample_2000_2019_DO_10m.xlsx')) %>%
+#   dplyr::mutate(Date = as.Date(Date)); 
+
+
+
+### 1.3. if choosing the 'bottom DO' in the profile
+whichDO <- 'DO_bottom'
+
+# df_do_bottom <- readxl::read_excel(path = paste0('./data/data_for_gee/', 'sample_2000_2019_DO_depth_max.xlsx')) %>%
+#   dplyr::mutate(Date = as.Date(Date)); 
+# 
+# df_do_bottom %>%
+#   distinct(YEID, Year) %>%
+#   group_by(Year) %>%
+#   tally()
+
+
+# df_do_toBeLinked <- df_do_min
+# df_do_toBeLinked <- df_do_10m
+# df_do_toBeLinked <- df_do_bottom ## old data with 97 samples for 2019
+
+df_do_toBeLinked <- df_do_new
+
+
+df_do_toBeLinked %>%
+  distinct(YEID, Year) %>%
+  group_by(Year) %>%
+  tally()
+```
+
+
+
+```{r link with DO - by day, include=FALSE}
+
+### DO data with sampling date -------------------------------------------------------------------------
+
+for (nw in seq(0, 90)) {
+  # print(nw)
+  
+  ### read in cleaned RS data
+  fname <- paste0(dir.cleaned, 'by_timelag_byDay/sample_2000to2019_ImageBandValue_at_SamplingLocations_', 
+                  nw, '_dayBefore', '.xlsx'); 
+  # print(fname)
+  f_rs <- readxl::read_excel(fname) 
+  
+  ### join DO table and spectrum table ---------------
+  f <- merge(x = f_rs, 
+             y = df_do_toBeLinked, by = 'YEID') 
+  
+  f_check <- f %>%
+    arrange(!is.na(year), !is.na(Year))
+  
+  ### write to .xlsx ---------------------------------
+  fname <- paste0(dir.cleaned, 'by_timelag_withDO/sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_byDay_',
+                  nw, '_dayBefore', '.xlsx'); 
+  print(fname)
+  writexl::write_xlsx(x = f, path = fname)
+}
+```
+
+
+
+
+```{r link with DO - by date range, message=FALSE, warning=FALSE, include=FALSE}
+### 2. To choose which data as the input
+
+# prefix <- '_weekBefore';                       prefix # the weekly one 
+
+interval <- 7  ## every  7 days as the time lag unit
+interval <- 10 ## every 10 days as the time lag unit
+# interval <-  5 ## every 10 days as the time lag unit
+
+prefix <- paste0('_', interval, 'DaysBefore'); prefix # the every 10 days one
+
+time_range <- 80 ## look at time-lag range up to 80 days (2 month + 20 days buffer)
+slots      <- ceiling(time_range/interval); slots ## round up the number
+
+for (nw in seq(1, slots)) {
+  # print(nw)
+  
+  ### read in cleaned spectrum band data (time lag 1-8 week)
+  fname <- paste0(dir.cleaned, 'by_timelag/sample_2000to2019_ImageBandValue_at_SamplingLocations_', 
+                  nw, prefix, '.xlsx'); print(fname)
+  f_rs <- readxl::read_excel(fname) 
+  
+  ### join DO table and spectrum table ---------------
+  f <- merge(x = f_rs, 
+             y = df_do_toBeLinked, by = 'YEID') 
+  
+  f_check <- f %>%
+    arrange(!is.na(year), !is.na(Year))
+  
+  ### write to .xlsx ---------------------------------
+  fname <- paste0(dir.cleaned, 'by_timelag_withDO/sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_',
+                  nw, prefix, '.xlsx'); print(fname)
+  writexl::write_xlsx(x = f, path = fname)
+  
+  
+  ### convert to .shp --------------------------------
+  projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+  
+  ### to train RF in GEE, there should be no NA values in each band
+  f_noNA <- merge(x = f_rs %>% drop_na(), 
+                  y = df_do_toBeLinked, by = 'YEID') 
+  f_shp <- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+  
+  ### write to .shp
+  shp_name <- paste0('sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_', 
+                     nw, prefix, '_noNA', '.shp');  print(shp_name)
+  shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+  st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+}
+```
+
+
+
+
+
+```{r Training samples for RF in GEE}
+
+### see code in the above chuck
+```
+
+
+
+
+
+## Spectrum in most recent week
+```{r recent7days, eval=FALSE, include=FALSE}
+### 3-day before + 3-day after --------------------------------------------------------------------------
+df_merge_7 <- df_merge %>%
+  ungroup() %>%
+  # group_by(YEID) %>%
+  dplyr::mutate(year = year(Date)) %>%
+  group_by(YEID, year) %>%
+  ### test -------------------------
+  # dplyr::filter(YEID == '2014_003') %>%
+  # dplyr::filter(year == 2014) %>% ## this line is for testing only
+  ### ------------------------------  
+  dplyr::filter(date_img >= (Date - 3),
+                date_img <= (Date + 3)) %>%
+  dplyr::mutate(n_day_ago = Date - date_img,
+                n_day_ago = as.numeric(n_day_ago)) %>%
+  dplyr::select(YEID, Date, date_img, n_day_ago, everything())
+
+df_merge_7_comp <- df_merge_7 %>%
+  ungroup() %>%
+  dplyr::select(-Date, -date_img, -n_day_ago) %>%
+  group_by(YEID) %>%
+  summarise_all(list(mean), na.rm = TRUE)
+
+
+f <- merge(x = df_merge_7_comp, y = df_do_min, by = 'YEID') 
+  
+f_check <- f %>%
+    arrange(!is.na(year), !is.na(Year))
+  
+fname <- paste0(dir.cleaned, 'by_timelag_withDO/sample_2005to2019_pixelValue_withDOmin_', 
+                'recent7days', '.xlsx'); print(fname)
+writexl::write_xlsx(x = f, path = fname)
+```
+
