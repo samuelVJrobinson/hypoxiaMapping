@@ -1,0 +1,702 @@
+---
+title: "Untitled"
+author: "Yingjie"
+date: "11/1/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+# Package
+```{r}
+remove(list = ls())
+
+library(readr)
+library(tidyverse)
+library(cowplot)
+
+## DF to Raster
+library(sp)
+library(raster)
+
+
+## Plot maps
+library(tmap)
+library(RColorBrewer)
+library(grid) ## put plots in a panel
+
+
+## a function to only keep 'dead zone' cells, while remove all other cells
+func_dz_raster <- function(r){
+  r[r > 2]  <- NA
+  r[r <= 2] <- 1    ## 
+  return(r)
+}
+
+```
+
+
+# Data
+
+## Load data
+```{r}
+# ## load FR data
+# load('./data/FRmapDat.Rdata')
+# head(FRmapDat)
+# # str(FRmapDat)
+# 
+# 
+# ## load LL data
+# load('./data/LLmapDat.Rdata')
+# head(LLmapDat)
+# # str(LLmapDat)
+
+
+##
+load('./data/FRmapDatFull.Rdata') # --> FRmapDatFull
+head(FRmapDatFull)
+load('./data/LLmapDatFull.Rdata') # --> LLmapDatFull
+head(LLmapDatFull)
+```
+
+
+## Select data for plotting
+```{r}
+
+## --> 1st to choos -----------------------> 
+dat <- FRmapDatFull; which_dat <- 'FR'
+# dat <- LLmapDatFull; which_dat <- 'LL'
+
+
+## --> 2nd to choose ---------------------->
+which_do <- 'predDO'
+
+
+## --> 3rd no need to action --------------|
+doy_ls <- unique(dat$doy) %>% as.character(); doy_ls
+```
+
+
+
+## test 1 - df to raster
+```{r eval=FALSE, include=FALSE}
+doy_id <- '152'
+date_ini <- doy_id; date_ini
+
+df <- dat %>%
+  dplyr::filter(doy == doy_id) %>%
+  dplyr::select(lon, lat, predDO)
+
+## dataframe with coordinates to raster 
+coordinates(df) <- ~lon+lat 
+gridded(df) <- TRUE
+# class(df)
+# str(df@data)
+
+r <- raster(df) 
+class(r)
+res(r)
+
+## plot raster
+plot(r)
+
+## write it as a geoTIFF
+fname <- paste0("./data/results/", which_dat, "map_", which_do, '_', date_ini, ".tif"); fname
+# writeRaster(r, filename = fname, overwrite=TRUE)
+
+
+```
+
+
+## test 2 - df to raster
+
+  This is the approach provided by Sam. It works but can not be read in and plot using `tmap` package.
+  
+```{r eval=FALSE, include=FALSE}
+library(sp)
+library(raster)
+
+#Get info needed for transforming points to rasters
+tempRaster <- brick("./data/2014_121.tif") #Read in first combined tif file
+tempRes <- res(tempRaster); tempRes #Resolution
+tempCRS <- crs(tempRaster) #CRS
+tempExtent <- extent(tempRaster) #Extent
+
+#Not sure what your workflow is, but say you only wanted a raster for the first doy:
+df       <- dplyr::filter(dat, doy == doy_id) #Choose only first slice
+dfCoords <- df[,c('lon','lat')]
+dfData   <- df %>% dplyr::select(predDO) #Get rid of extra info
+dfsp     <- SpatialPointsDataFrame(coords = dfCoords, data = dfData, proj4string=tempCRS) #Convert to sp object
+
+r <- raster(crs = tempCRS, vals = NA, resolution = tempRes, ext = tempExtent) %>%
+  rasterize(dfsp, .)
+
+plot(r$predDO) #Works
+
+#Now that it's been converted, you can save it in whatever form you want using writeRaster()
+## write it as a geoTIFF
+fname <- paste0("./data/results/", which_dat, "map_", which_do, '_', date_ini, ".tif"); fname
+# writeRaster(r, filename = fname, overwrite=TRUE)
+```
+
+
+## test 3 - area calculation
+```{r eval=FALSE, include=FALSE}
+
+## Here we take the result from GEE as the reference for testing different methods 
+
+r_name <- './data/data_from_gee/predict_do_maps_lag10d/do_map_20140721.tif'
+r <- raster(r_name)
+# r <- brick(r_name)
+r_dz <- func_dz_raster(r = r)
+plot(r)
+plot(r_dz, col = 'red', legend = F)
+
+
+
+## a summary of all the methods and the results ----------
+
+## GEE:        12366 km2
+## approach 1: 12404 km2 ## The best --> to use this one for the following calculations
+## approach 2: wrong
+## approach 3: 12415 km2
+## approach 4: 12434 km2 (terra)
+
+
+
+### approach 1 -------------------------------------------
+tapply(area(r_dz), r_dz[], sum)
+
+
+### approach 2 ------------------------------------------- wrong!!
+# r_dzr <- as.data.frame(r_dz); names(r_dzr) <- 'predDO'
+# r_dzr %>%
+#   group_by(predDO) %>%
+#   tally() %>%
+#   mutate(area = n * res(r_dz)[1] * res(r_dz)[2])
+
+
+### approach 3 -------------------------------------------
+# #get sizes of all cells in raster [km2]
+# cell_size <- area(r_dz, na.rm=TRUE, weights=FALSE)
+# plot(cell_size)
+# #delete NAs from vector of all raster cells
+# cell_size <- cell_size[!is.na(cell_size)]
+# #compute area [km2] of all cells in geo_raster
+# raster_area <- length(cell_size)*median(cell_size); raster_area
+
+
+
+
+### approach 3 -------------------------------------------
+
+# library(terra)
+### SpatRaster 
+# r <- rast(x = r_name)
+# r_dz <- func_dz_raster(r = r)
+# plot(r_dz, col = 'red', legend = F)
+# # summed area in km2
+# terra::expanse(r_dz, unit="km", transform=TRUE)
+
+```
+
+
+## Loop DF and calculate dz area
+```{r}
+
+area_df <- data.frame()
+
+for (doy_id in doy_ls) {
+  
+  ## - to get the date info
+  date_ini     <- as.Date(as.numeric(doy_id), origin = "2014-01-01"); date_ini
+  # date_ini     <- format(date_ini, format ='%Y%m%d'); date_ini
+  
+
+  ## - df to raster -------------------------------------------------- #
+  df <- dat %>%
+  dplyr::filter(doy == doy_id) %>%
+  dplyr::select(lon, lat, which_do)
+  ## dataframe with coordinates to raster 
+  coordinates(df) <- ~lon+lat 
+  gridded(df) <- TRUE
+  r <- raster(df) 
+  
+  ## - to calculate dz area ------------------------------------------ #
+  r_dz      <- func_dz_raster(r = r)
+  r_dz_area <- tapply(area(r_dz), r_dz[], sum)
+  
+  ## - put results in a dataframe
+  area    <- data.frame(model = which_dat, date = date_ini, area = r_dz_area)
+  area_df <- rbind(area_df, area)
+}
+
+
+fname <- paste0('./data/', which_dat, 'mapDatFull_dz_area_overTime.csv'); fname
+write.csv(x = area_df, file = fname, row.names = F)
+```
+
+
+
+## Loop DF and save as TIF
+```{r}
+
+for (doy_id in doy_ls) {
+  
+  ## - to get the date info
+  date_ini     <- as.Date(as.numeric(doy_id), origin = "2014-01-01"); date_ini
+  date_ini2     <- format(date_ini, format ='%Y%m%d'); date_ini2
+  
+  ## - only save TIF from 7/21 - 7/31 -------------------------------- #
+  if(date_ini < as.Date('2014-07-21') ){ 
+    print('skip')
+  } else if (date_ini > as.Date('2014-07-31')) {
+    print('skip')
+  } else {
+    print(date_ini)
+    ## - df to raster -------------------------------------------------- #
+    df <- dat %>%
+    dplyr::filter(doy == doy_id) %>%
+    dplyr::select(lon, lat, which_do)
+    ## dataframe with coordinates to raster 
+    coordinates(df) <- ~lon+lat 
+    gridded(df) <- TRUE
+    r <- raster(df) 
+    ## - write it as a geoTIFF
+    fname <- paste0("./data/results/daily/", which_dat, "map_", which_do, '_', date_ini2, ".tif"); fname
+    writeRaster(r, filename = fname, overwrite=TRUE)
+    }
+}
+```
+
+
+
+#  Plot Area
+
+## Plot dz area time series
+
+### RF
+```{r}
+getwd()
+
+## temporal change of dz area in 2014
+csv <- './data/data_from_gee/area_dz_over_time.csv'
+# csv <- './data/data_from_gee/area_dz_over_time_10dLag.csv'
+
+area_dz_rf <- read_csv(csv) %>%
+  rename_at(vars(starts_with("system")), ~'date') %>%
+  dplyr::rename(area = Area) %>%
+  dplyr::mutate(date = as.Date(date, "%B %d, %Y"), 
+                model = 'RF') %>%
+  dplyr::select(model, date, area)
+
+
+ggplot(area_dz_rf, aes(x = date, y = area)) +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y ~ x', color = 'darkorange') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw()
+
+fname <- paste0('./figures/', 'area_dz_overTime_RF.png'); fname
+# ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in', dpi = 300)
+
+
+
+summary(area_dz_rf$area)
+
+
+# July 26 - August 3
+area_dz_rf %>% 
+  dplyr::filter(date >= as.Date('2014-07-19'), 
+                date <= as.Date('2014-08-15')) %>%
+  summary()
+  
+```
+
+
+
+### FDA & LLR
+```{r}
+area_dz_fr <- readr::read_csv("./data/FRmapDatFull_dz_area_overTime.csv")
+area_dz_ll <- readr::read_csv("./data/LLmapDatFull_dz_area_overTime.csv")
+area_dz    <- rbind(area_dz_fr, area_dz_ll)
+
+area_dz %>%
+  ggplot(aes(x = date, y = area, color = model)) +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y~x') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw()
+
+
+area_dz %>%
+  rbind(area_dz_rf) %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y~x') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw()
+fname <- paste0('./figures/', 'area_dz_overTime_3models_daily.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 6, height = 4, units = 'in', dpi = 300)
+```
+
+
+
+
+
+
+## Plot agg data 
+
+  FDA, LLR, RF
+  
+```{r - Fig 3b}
+library(lubridate)
+model_fullname <- c('Lagged Linear Regression', 'Random Forest Regression', 'Functional Data Analysis')
+
+## --> create a time frame, in which put every 10 days as a slot
+ds <- data.frame(date = seq(as.Date("2014-05-01"), as.Date("2014-09-01"), by="days")) %>%
+  dplyr::mutate(y = year(date),
+                m = month(date),
+                d = day(date),
+                b = case_when(d < 11 ~ 1,
+                              d < 21 ~ 2,
+                              TRUE   ~ 3),
+                slot = paste0(y, '-',  m, '-', b, '0') %>% as.Date(., format="%Y-%m-%d")
+                  ) %>%
+  dplyr::select(date, slot) %>%
+  as.data.frame()
+
+## --> get the median value of each 10-day slot, for `LLR` and `FDA`
+## --> then row bind with `RFR` data
+area_dz_10d <- merge(area_dz, ds, by = 'date', all.x = T) %>%
+  group_by(model, slot) %>%
+  dplyr::summarise(med = median(area, na.rm = T)) %>%
+  dplyr::rename(area = med, date = slot) %>%
+  as.data.frame() %>%
+  rbind(area_dz_rf) %>%
+  dplyr::mutate(model = factor(x = model, levels = c('LL', 'RF', 'FR'), labels = c('LLR', 'RFR', 'FDA'))) %>%
+  as.data.frame()
+
+str(area_dz_10d)
+
+
+## - plot 1 - whole time range ---------------------------------------------------------------------
+area_dz_10d %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y~x') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw() +
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85))
+
+fname <- paste0('./figures/', 'area_dz_overTime_3models.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 6, units = 'in', dpi = 300)
+
+
+
+
+## - plot 2 - only 6/1 - 9/1
+
+area_dz_10d %>%
+  dplyr::filter(date >= as.Date('2014-06-01'), date <= as.Date('2014-09-01')) %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point(show.legend = F, size = 1) +
+  geom_smooth(method = 'loess', formula = 'y~x', show.legend = T) +
+  geom_vline(xintercept = as.Date('2014-06-09'), linetype = 'dashed', color = 'gray50') +
+  geom_vline(xintercept = as.Date('2014-09-11'), linetype = 'dashed', color = 'gray50') +
+  ylab('Area (sq km)')+ xlab('Date') +
+  theme_bw() +
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85), panel.grid.minor = element_blank())
+fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 6, units = 'in', dpi = 300)
+
+
+
+
+## - plot 2 - only 6/1 - 9/1 -- facet
+area_dz_10d %>%
+  dplyr::mutate(model = factor(model, levels = c('LLR', 'RFR', 'FDA'), labels = model_fullname)) %>%
+  # dplyr::filter(date >= as.Date('2014-05-20'), date <= as.Date('2014-09-03')) %>%
+  ggplot(aes(x = date, y = area, color = model, fill = model)) +
+  geom_point(show.legend = F, size = 1) +
+  geom_smooth(method = 'loess', formula = 'y~x', show.legend = F) +
+  geom_vline(xintercept = as.Date('2014-06-09'), linetype = 'dashed', color = 'gray50') +
+  geom_vline(xintercept = as.Date('2014-09-11'), linetype = 'dashed', color = 'gray50') +
+  # geom_segment(aes(x = as.Date('2014-08-21'), xend = as.Date('2014-07-25'), 
+  #                  y = 12000, yend = 13000), show.legend = F,
+  #                 arrow = arrow(length = unit(0.5, "cm"))) +
+  facet_wrap(~model) + #, scales = 'free_y'
+  ylab('Area (sq km)')+ xlab('Date') +
+  # ylim(-3000, NA) +
+  theme_bw() +
+  labs(fill = 'Models', color = 'Models') +
+  theme(legend.position = c(0.1, 0.85), 
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank(), panel.grid.major.x = element_blank())
+fname <- paste0('./figures/', 'area_dz_overTime_3models_Jun1Sep1_facet.png'); fname
+ggsave(filename = fname, plot = last_plot(), width = 7, height = 3, units = 'in', dpi = 300)
+```
+
+
+
+```{r - report the peak area in MS}
+###
+
+summary(area_dz_10d$area)
+
+area_dz_10d_peak <- area_dz_10d %>%
+  dplyr::filter(date >= as.Date('2014-07-15'), date <= as.Date('2014-08-15')) 
+
+
+x <- area_dz_10d_peak$area
+x[!x %in% boxplot.stats(x)$out]
+
+area_dz_10d_peak_sm <- area_dz_10d_peak %>%
+  arrange(model, desc(area)) %>%
+  group_by(model) %>%
+  dplyr::summarise(mean = mean(area, na.rm = T), 
+                   # median = median(area, na.rm = T), 
+                   max = max(area, na.rm = T)) %>%
+  as.data.frame()
+
+area_dz_10d_peak_sm
+
+mean(area_dz_10d_peak$area)
+sd(area_dz_10d_peak$area)
+std <- function(x) sd(x)/sqrt(length(x))
+std(area_dz_10d_peak$area)
+
+library(psych)
+psych::describeBy(area_dz_10d_peak %>% dplyr::select(-date), group="model", mat = T, digits = 2)
+```
+
+
+
+
+
+
+# -----------------------------------------
+
+# Figure S8
+
+## Plot maps --- (7/21 - 7/31)
+
+```{r}
+## This function aims to plot multiple maps in one column 
+source('./func_domap_1col.R')
+
+which_do <- 'predDO'
+
+### load help data, such as the Gulf states, rivers, state boundary
+load('./data/helper_data_map.RData')
+```
+
+
+### FDA, LLR
+```{r}
+dat <- FRmapDatFull; which_dat <- 'FR'
+# dat <- LLmapDatFull; which_dat <- 'LL'
+
+
+### read in the DO raster
+pat <- paste0(which_dat, "map_", which_do); pat
+ras_ls <- list.files(path = './data/results/daily/', pattern = pat, full.names = T); ras_ls
+
+
+### test use
+ras <- ras_ls[1]; ras
+
+
+### loop and plot the DO raster
+for (ras in ras_ls) {
+  
+  ## to get a formatted name for each plot 
+  date_ini <- basename(ras) %>% gsub("\\D", "", .) %>% as.Date(., "%Y%m%d"); print(date_ini)
+  # date_end <- (date_ini) + 9; #print(date_ini)
+  # ras_nm <- paste0(date_ini, ' ~ ', date_end); print(ras_nm)
+  ras_nm <- date_ini %>% gsub('-', '', .); #print(ras_nm)
+  map_nm <- paste0('domap_', which_dat, ras_nm)
+  
+  dz  <- raster(ras)
+  dz[dz < 0] <- 0    ## turn negative values to 0
+  
+  domap <-
+    tm_shape(dz, bbox = bhu_bb) +
+    tm_raster(style = "fixed", 
+              # style = "cont",
+              title = "DO (mg/l)",
+              breaks = seq(0, 8, 2),
+              palette = brewer.pal(9,"RdYlBu"), legend.show = F) +
+    tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+    tm_layout(bg.color = '#4575B4', legend.height = 1,
+              legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+              legend.text.color = 'white', legend.title.color= 'white',
+              # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+              title = ras_nm, 
+              # title.position = c('left', 'bottom'), 
+              title.position = c(0, 0.9), title.size = 0.7,
+              legend.position= c("left", "bottom"))
+  domap
+  
+  ## to assign a name to each plot for later use
+  assign(map_nm, domap)
+}
+
+
+## get the list of all the plots
+domap_ls <- mget(ls(pattern = paste0('domap_', which_dat, '2014')))
+
+
+## put all plots in one panel ----------------------------------------------------------------------
+library(grid)
+
+
+
+## 1. in a 3*3 panel --------------------------
+# fname <- paste0("./figures/do_maps_SI_", which_dat, '_', which_do,  "_3col.png"); fname
+# png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
+# 
+# # by rows 
+# grid.newpage()
+# pushViewport(viewport(layout = grid.layout(
+#   nrow = 4,
+#   ncol = 3
+#   )))
+# 
+# z = 0
+# for (i in 1:4) {
+#   # print(i)
+#   for (j in 1:3) {
+#     z = z + length(i)
+#     print(z)
+#     
+#     if (z>12) {
+#       break
+#     }
+#     print(domap_ls[z], vp = viewport(layout.pos.row = i, layout.pos.col = j))
+#   }
+# }
+# dev.off()
+
+
+## 2. in a n row * 1 col panel --------------------------
+# func_domap_1col(n_plots = 11, h = 3.2)
+func_domap_1col(n_plots = 11, h = 3.2/2)
+```
+
+
+
+### RF
+```{r}
+## data path
+dir.do.tif <- '../Dead_Zone_telecoupling/data/data_from_gee/predict_do_maps_lag10d/'
+which_dat <- 'RF'
+
+
+date_ls <- seq(as.Date("2014-07-21"), as.Date("2014-07-31"), by="days")
+ras_ls  <- paste0(dir.do.tif, 'do_map_', gsub('-', '', date_ls), '.tif'); ras_ls
+
+date_oi <- c(as.Date('2014-07-21'), as.Date('2014-07-31'))
+
+## TEST 
+# ras <- ras_ls[1]
+
+counter = 0
+for (i in 1:length(ras_ls)) {
+  ras <- ras_ls[i]
+  ## this will be used to determine if to add a legend --> only add a legend to the 1st map
+  counter = counter + length(ras); #print(counter)
+  yes_or_no <- if(counter < 2) 1 else 0
+  print(yes_or_no)
+  
+  date_ini <- basename(ras) %>% gsub('do_map_|\\.tif', '', .) %>% as.Date(., "%Y%m%d"); print(date_ini)
+  ras_nm <- date_ini %>% gsub('-', '', .); print(ras_nm)
+  map_nm <- paste0('domap_', which_dat, ras_nm)
+  
+  ## - only map TIF on  7/21 and 7/31 -------------------------------- #
+  
+  ## --> add a legend to the first map only
+  if (date_ini == as.Date('2014-07-21')) { 
+    dz  <- raster(ras)
+    domap <-
+      tm_shape(dz, bbox = bhu_bb) +
+      tm_raster(style = "fixed", 
+                # style = "cont",
+                title = "DO (mg/l)",
+                breaks = seq(0, 8, 2),
+                palette = brewer.pal(9,"RdYlBu"), legend.show = 0) + ## legend.show = yes_or_no
+      tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+      tm_layout(bg.color = 'black', legend.height = 1, legend.bg.alpha = 0.7, 
+                legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+                legend.text.color = 'white', legend.title.color= 'white',
+                # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+                title = ras_nm, 
+                # title.position = c('left', 'bottom'), 
+                title.position = c(0, 0.9), title.size = 0.7,
+                legend.position= c(0.8, 0))
+    domap
+    # assign(map_nm, domap)
+    
+    ## --> print the next available map ------------------------------- #
+  } else if(date_ini == as.Date('2014-07-31')) {
+    dz  <- raster(ras)
+    domap <-
+      tm_shape(dz, bbox = bhu_bb) +
+      tm_raster(style = "fixed", 
+                # style = "cont",
+                title = "DO (mg/l)",
+                breaks = seq(0, 8, 2),
+                palette = brewer.pal(9,"RdYlBu"), legend.show = yes_or_no) +
+      tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+      tm_layout(bg.color = 'black', legend.height = 0.5, legend.bg.alpha = 0.5, 
+                legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+                legend.text.color = 'white', legend.title.color= 'white',
+                # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+                title = ras_nm, title.position = c(0, 0.9), title.size = 0.7,
+                # title.position = c('left', 'bottom'), 
+                legend.position= c("right", "bottom"))
+    
+    
+  } 
+  
+  ## --> print the legend on the 2nd blank map --------------------- #
+  # else if (counter == 2) {
+  #   domap <- tm_shape(dz, bbox = bhu_bb) +
+  #     tm_raster(style = "fixed", 
+  #               # style = "cont",
+  #               title = "DO (mg/l)",
+  #               breaks = seq(0, 8, 2),
+  #               palette = brewer.pal(9,"RdYlBu"), legend.show = 1) +
+  #     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+  #     tm_layout(bg.color = 'black', legend.height = 2, legend.bg.alpha = 0.8, 
+  #               legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+  #               legend.text.color = 'white', legend.title.color= 'white',
+  #               # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+  #               title = ras_nm, legend.only = T,
+  #               # title.position = c('left', 'bottom'), 
+  #               title.position = c(0, 0.9), title.size = 0.7,
+  #               legend.position= c(0.4, 0))
+  #   
+  # } 
+  
+  ## --> print blank maps ------------------------------------------ #
+  else {
+    domap <- plot.new() # plot(1, type = "n", xlab = "", ylab = "", xlim = c(0, 5), ylim = c(0, 5))
+  }
+  assign(map_nm, domap)
+
+}
+
+
+domap_ls <- mget(ls(pattern = paste0('domap_', which_dat, '2014')))
+
+func_domap_1col(n_plots = 11, h = 3.2/2)
+
+```
+
+
+
