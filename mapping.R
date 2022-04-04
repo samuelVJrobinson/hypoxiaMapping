@@ -11,6 +11,7 @@ library(mgcv)
 library(parallel)
 library(beepr)
 library(ggpubr)
+library(missMDA)
 source('helperFunctions.R')
 
 load('./data/all2014_2.Rdata')
@@ -72,42 +73,160 @@ files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
 # b <- Sys.time()
 # b-a #Takes about 6 mins for 30 images
 
-sDat <- lapply(files$combined,function(datPath){
-  cNames <- names(brick(files$aqua[1])) #Channel names
-  sD <- brick(datPath) #Read data
-  names(sD) <- cNames #Add names
-  sD2 <- rasterToPoints(sD) #Convert to point dataframe
-  nMissing <- apply(sD2[,!grepl('(x|y)',colnames(sD2))],1,function(x) sum(is.na(x))) #Proportion of missing values in each row (cell)
-  sD2 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2],sD2[nMissing<5,]) #Keep points with 4 or more, and add date
-  return(sD2)
-}) #Takes about 10 seconds
+{a <- Sys.time()
+  sDat <- lapply(files$combined,function(datPath){
+    cNames <- names(brick(files$aqua[1])) #Channel names
+    sD <- brick(datPath) #Read data
+    names(sD) <- cNames #Add names
+    sD2 <- rasterToPoints(sD) #Convert to point dataframe
+    nMissing <- apply(sD2[,!grepl('(x|y)',colnames(sD2))],1,function(x) sum(is.na(x))) #Proportion of missing values in each row (cell)
+    # sD3 <- sD2[nMissing<5,] #Retains records with 4 or more data values
+    # if(nrow(sD3)==0) sD3 <- rbind(sD3,rep(NA,ncol(sD3)))
+    sD4 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2], #Day of year
+                      sD2,numNA=nMissing) 
+    return(sD4)})
+Sys.time()-a} #Takes about 2 mins
 names(sDat) <- sapply(sDat,function(x) x$doy[1])
 
-#Preview day 152
+# #Preview day 152
 # sDat[[1]] %>% #Chlor_a on day 152
-#   filter(x>(-86.75),x<(-86.25),y<30.2,y>29.8) %>%
 #   ggplot(aes(x=x,y=y,fill=chlor_a))+
 #   geom_raster()
 
-#Decided to omit non-complete cells - lots of completely missing cells already, so this doesn't hurt that much
-sDat2 <- do.call('rbind',sDat) %>% na.omit() %>% #Combine into single DF and remove NAs
-  mutate(doy=as.numeric(doy)) %>% #Convert to numeric
-  mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) %>% #Set upper limit of nflh just below 1
-  #Rescales negative values be above 0.95*minimum positive value
-  mutate(across(chlor_a:Rrs_678,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) 
-summary(sDat2)
+sDat2 <- do.call('rbind',sDat) #Combine into single DF 
 
-#Only observations
-obs <- sDat2 %>% dplyr::select(-doy:-y) %>% 
-  as.matrix() %>% log() #Log-transform
+# lwrLimits <- apply(dplyr::select(sDat2,chlor_a:sst),2,function(x) min(x[x>0],na.rm=TRUE)) #Minimum nonzero values
+lwrLimits <- apply(dplyr::select(sDat2,chlor_a:sst),2,function(x) min(x,na.rm=TRUE)) #Minimum values
+names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
 
-#Calculate PCs 1-6
-PCs <- ((obs-outer(rep(1,nrow(obs)),pca1$center))/outer(rep(1,nrow(obs)),pca1$scale)) %*% pca1$rotation
-PCs <- PCs[,1:6]
-sDat2 <- cbind(sDat2,PCs) #Combine PCs with sDat2# 
+sDat2 <- sDat2 %>% 
+  # # #Rescales negative values be above 0.95*minimum positive value
+  # mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x)))
+  # Adds lowest value + 10% if lwrLimits < 0
+  mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>% 
+  mutate(across(chlor_a:sst,log)) #Log-scale variables
 
-#Add coordinate system
-sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
+sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form
+sDat2$numNA <- apply(sDatMat,1,function(x) sum(is.na(x))) #Get number of NA values
+round(table(sDat2$numNA)/nrow(sDat2),4) #~50% cells missing all data, ~40% complete
+locs <- dplyr::select(sDat2,x,y) %>% unique() %>% mutate(locID=1:n()) #Locations only
+datMissing <- sDat2$numNA==13 #Locations missing all data
+
+sDat2Miss <- sDat2 %>% filter(datMissing) #Completely missing 
+sDat2SomeMiss <- sDat2 %>% filter(numNA!=13,numNA!=0) #Some non missing
+sDat2NoMiss <- sDat2 %>% filter(numNA==0) #No missing
+
+sDatMat <- sDat2SomeMiss %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Partly missing data in matrix form
+
+# n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes about 5 mins
+# plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
+
+#Same as imputePCA, but multicore. Splits X into slices of nPer each, passes to cluster cl, reassembles
+imputePCA_multi <- function(X,ncp=2,scale=TRUE,method='Regularized',nPer=10000,ncore=10){
+  # X <- sDatMat #Debugging
+  # nPer <- 10000
+  # ncore <- 10
+  # ncp <- 3
+  # scale <- TRUE
+  # method <- 'Regularized'
+  
+  #Assign rows to sample strata
+  sampNum <- c(rep(1:(nrow(X) %/% nPer),each=nPer), #Regular samples
+    rep((nrow(X) %/% nPer + 1),(nrow(X) %% nPer))) #"Leftovers"
+  
+  sampOrd <- sample(1:length(sampNum))
+  sampNum <- sampNum[sampOrd] #Randomize
+  
+  rNames <- rownames(X) #Save rownames
+  rownames(X) <- 1:nrow(X)
+  
+  IP <- function(x,ncp,scale,method) imputePCA(x,ncp,scale,method)$completeObs #Convenience function to pull only 1 matrix from output
+  
+  print('Breaking into separate matrices')
+  X <- lapply(1:max(sampNum),function(x) X[sampNum==x,]) #Break into separate matrices
+  if(ncore>1){
+    library(parallel)
+    cl <- makeCluster(ncore)
+    print(paste('Running imputePCA across',ncore,'clusters'))
+    clusterEvalQ(cl,library(missMDA)) #Loads missMDA on each cluster
+    for(i in 1:(ceiling(length(X)/ncore))){ #Break into sets. Tends to hang on large 
+      use <- ((i-1)*ncore+1):pmin(length(X),(i*ncore)) #Which sets of matrices to use
+      X[use] <- parLapply(cl=cl,X=X[use],fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+      cat('.') #Something to look at
+      # X <- parLapply(cl=cl,X=X,fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+    }
+    stopCluster(cl); gc()
+  } else {
+    # X <- lapply(X,IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+    times <- rep(NA,length(X))
+    for(i in 1:length(X)){
+      a <- Sys.time()
+      X[[i]] <- IP(X[[i]],ncp=ncp,scale=scale,method=method)
+      b <- Sys.time()
+      times[i] <- difftime(b,a,units='secs')
+      print(paste0('Finished ',i,'. Time: ',round(times[i],2),'. Average time: ',round(mean(times,na.rm=TRUE),2), 
+                   '. Estimated remaining (mins): ',round(mean(times,na.rm=TRUE),2)*(length(X)-i)/60 ))
+    } 
+  }
+  X <- do.call(rbind,X) #Recombine into single matrix
+  
+  if(length(rNames)!=nrow(na.omit(X))) stop('NA values still present in dataframe')
+  
+  X <- X[order(as.numeric(rownames(X))),] #Reorder
+  rownames(X) <- rNames #Reset rownames
+  
+  print('Done')
+  return(X)
+}
+
+#~3 mins
+sDatMat_imputed <- imputePCA_multi(sDatMat,ncp=7,scale=TRUE,method='Regularized',nPer = 10000,ncore = 15) #Impute missing data using 7 dimensions
+
+sDat2SomeMiss[which(names(sDat2SomeMiss)=='chlor_a'):which(names(sDat2SomeMiss)=='sst')] <- sDatMat_imputed #Rejoin
+
+rm(sDatMat_imputed); gc() #Cleanup
+
+#Put back into a single dataframe again
+sDat2 <- bind_rows(sDat2Miss,sDat2SomeMiss,sDat2NoMiss) %>% dplyr::select(-numNA) %>% arrange(doy,x,y)
+rm(sDat2Miss,sDat2SomeMiss,sDat2NoMiss,sDatMat,datMissing); gc()
+
+sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form again
+
+useThese <- unname(which(apply(sDatMat,1,function(x) !any(is.na(x))))) #Rows without missing values
+
+(pca1 <- prcomp(sDatMat[useThese,],center = TRUE, scale. = TRUE)) #Principle components
+pca1$center
+pca1$scale
+
+#Looks like 5 PCs get 98.6% of var
+data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
+    ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
+    labs(x='Principle Component',y='Cumulative Variance')+
+    geom_hline(yintercept = 0.95,col='red',linetype='dashed')+
+  scale_x_continuous(n.breaks=length(pca1$sdev),minor_breaks = NULL)
+
+#Factor loadings
+pca1$rotation[,1:5] %>% data.frame() %>% rownames_to_column(var='var') %>%
+  pivot_longer(PC1:PC5) %>%
+  mutate(name=factor(name,labels=paste0('PC',1:5,': ',round(pca1$sdev[1:5]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
+  mutate(var=factor(var,levels=rev(unique(var)))) %>%
+  ggplot()+ geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
+  facet_wrap(~name)+
+  labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-5')
+
+#Matrix to store PC values
+pcaMat <- matrix(NA,nrow = nrow(sDatMat), ncol=5,dimnames = list(rownames(sDatMat),paste0('PC',1:5)))
+
+pcaMat[useThese,] <- pca1$x[,1:ncol(pcaMat)] #Store PC values in matrix
+
+sDat2 <- cbind(sDat2,pcaMat) #Combine PCs with sDat2 
+
+rm(sDatMat,pcaMat); gc()
+
+#Add coordinate system - takes a minute or so
+sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>% 
+  dplyr::select(-chlor_a:-sst) %>% #Remove raw data, keep PCs
+  st_set_crs(4326) %>%
   geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
 
 Emean <- mean(unique(sDat2$E)); Nmean <- mean(unique(sDat2$N)) #Center values of E/N, used for scaling
@@ -115,15 +234,16 @@ Emean <- mean(unique(sDat2$E)); Nmean <- mean(unique(sDat2$N)) #Center values of
 sDat2 <- sDat2 %>% 
   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
   mutate(across(E:N,~round(.x))) %>% 
-  st_transform(4326) %>% dplyr::select(-chlor_a:-sst) %>% unite(loc,E,N) %>% 
+  st_transform(4326) %>% unite(loc,E,N) %>% 
   mutate(loc=as.numeric(factor(loc)))
 
 withinBuff <- sDat2 %>% st_intersects(.,dataBoundary) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
 sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
 locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table for locations
-# ggplot(locLookup)+geom_sf()
+# ggplot()+geom_sf(dat=dataBoundary)+geom_sf(dat=locLookup)
 
-rm(obs,withinBuff); gc()
+rm(withinBuff,useThese); gc()
+
 
 # Fit PC models -----------------------------------
 
@@ -151,56 +271,58 @@ rm(obs,withinBuff); gc()
 # save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
 # load('./data/PCmods_mapping.RData') #Load original tensor product smoothers
 
-# #Approach using soap-film smoothers
-# #Testing:
-# 
-# # #Buffer data area - knots can't be too close to boundary
-# # dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
-# # #Create sampling zones for knots - idea: many close to the coast, fewer further away
-# # zones <- lapply(c(75,150),function(d){
-# #   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
-# #     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
-# #     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
-# #     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
-# #     st_intersection(.,dbTemp)
-# # })
-# #
-# # zones[[length(zones)+1]] <- st_difference(dbTemp,zones[[length(zones)+1-1]]) #Creates last zone
-# # for(i in (length(zones)-1):2){
-# #   zones[[i]] <- st_difference(zones[[i]],zones[[i-1]])
-# # }
-# # rm(dbTemp)
-# #
-# # #Looks OK
-# #
-# # # plot(knotLocs,add=TRUE,pch=19)
-# # knotLocs <- mapply(function(z,N){
-# #   z %>% st_transform(3401) %>% st_sample(size=N,type='hexagonal') %>% st_transform(st_crs(z))
-# # },z=zones,N=c(30,20,20)) %>%
-# #   do.call('c',.)
-# #
-# # plot(dataBoundary)
-# # plot(zones[[1]],add=TRUE,col='green') #Looks OK
-# # plot(zones[[2]],add=TRUE,col='red')
-# # plot(zones[[3]],add=TRUE,col='blue')
+#Approach using soap-film smoothers
+#Testing:
+
+# #Buffer data area - knots can't be too close to boundary
+# dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
+# #Create sampling zones for knots - idea: many close to the coast, fewer further away
+# zones <- lapply(c(75,150),function(d){
+#   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
+#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
+#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
+#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
+#     st_intersection(.,dbTemp)
+# })
+#
+# zones[[length(zones)+1]] <- st_difference(dbTemp,zones[[length(zones)+1-1]]) #Creates last zone
+# for(i in (length(zones)-1):2){
+#   zones[[i]] <- st_difference(zones[[i]],zones[[i-1]])
+# }
+# rm(dbTemp)
+#
+# #Looks OK
+#
 # # plot(knotLocs,add=TRUE,pch=19)
-# 
-# # #Strips out knots that are too close - ideally this would use some other kind of approach like simulated annealing to maximize distance between points while holding them within sampling bands
-# # minDist <- 30000 #20 km
-# # removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Should any knots be removed?
-# # while(any(removeKnot)){
-# #   knotLocs <- knotLocs[-which(removeKnot)[1],]
-# #   removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Checks if any points are closer than minDist
-# # }
-# 
-# # # Alternative: constant knot locations
-# # knotLocs <- dataBoundary %>% st_transform(3401) %>% st_buffer(-20*1000) %>%
-# #   st_transform(st_crs(dataBoundary)) %>%
-# #   st_transform(3401) %>% st_sample(size=100,type='hexagonal') %>% st_transform(st_crs(dataBoundary))
-# # plot(dataBoundary)
-# # plot(knotLocs,add=TRUE,pch=19)
-# 
+# knotLocs <- mapply(function(z,N){
+#   z %>% st_transform(3401) %>% st_sample(size=N,type='hexagonal') %>% st_transform(st_crs(z))
+# },z=zones,N=c(30,20,20)) %>%
+#   do.call('c',.)
+#
+# plot(dataBoundary)
+# plot(zones[[1]],add=TRUE,col='green') #Looks OK
+# plot(zones[[2]],add=TRUE,col='red')
+# plot(zones[[3]],add=TRUE,col='blue')
+# plot(knotLocs,add=TRUE,pch=19)
+
+# #Strips out knots that are too close - ideally this would use some other kind of approach like simulated annealing to maximize distance between points while holding them within sampling bands
+# minDist <- 30000 #20 km
+# removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Should any knots be removed?
+# while(any(removeKnot)){
+#   knotLocs <- knotLocs[-which(removeKnot)[1],]
+#   removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Checks if any points are closer than minDist
+# }
+
+# # Alternative: constant knot locations
+# knotLocs <- dataBoundary %>% st_transform(3401) %>% st_buffer(-20*1000) %>%
+#   st_transform(st_crs(dataBoundary)) %>%
+#   st_transform(3401) %>% st_sample(size=100,type='hexagonal') %>% st_transform(st_crs(dataBoundary))
+# plot(dataBoundary)
+# plot(knotLocs,add=TRUE,pch=19)
+
 # #Alternative: knots along lines of buffer distances
+# 
+# #Small example - single day
 # knotLocs <- mapply(function(d,N){
 #   dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
 #     coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
@@ -214,11 +336,11 @@ rm(obs,withinBuff); gc()
 # },d=c(50,125,225),N=c(30,20,10)) %>%  #Distances = 50,125,
 #   do.call('c',.)
 # 
-# plot(dataBoundary) #Looks OK
-# plot(knotLocs,add=TRUE,pch=19)
-# length(knotLocs)
+# ggplot() + #Looks OK
+#   geom_sf(data=dataBoundary,fill=NA) +
+#   geom_sf(data=slice_sample(sDat2,n=5000),alpha=0.3)+
+#   geom_sf(data=knotLocs,col='red') 
 # 
-# #Trying smaller example - single day
 # tempDat <- sDat2 %>% filter(doy==211) %>% st_drop_geometry()
 # 
 # #Get knot and boundary locations on same scale
@@ -263,10 +385,11 @@ rm(obs,withinBuff); gc()
 # plot(predict(PCmod1b),tempDat$PC1,main='Thin-plate'); abline(0,1,col='red')
 # par(mfrow=c(1,1))
 # 
-# #Model with tensor product smooth for days
 # 
+# #Small example - tensor product smooth across days
 # #Uses a subset of days: 201-221
 # tempDat <- sDat2 %>% filter(doy>=201,doy<=221) %>% st_drop_geometry()
+# tempGeom <- sDat2 %>% filter(doy>=201,doy<=221) %>% st_geometry()
 # 
 # library(parallel)
 # cl <- makeCluster(15)
@@ -290,83 +413,98 @@ rm(obs,withinBuff); gc()
 # plot(PCmod1b,scheme=2)
 # 
 # par(mfrow=c(1,2))
-# plot(predict(PCmod1a),tempDat$PC1,main='Soap film'); abline(0,1,col='red')
-# plot(predict(PCmod1b),tempDat$PC1,main='Thin-plate'); abline(0,1,col='red')
+# sampRows <- sample(1:nrow(tempDat),size = 5000)
+# plot(predict(PCmod1a)[sampRows],tempDat$PC1[sampRows],main='Soap film'); abline(0,1,col='red')
+# plot(predict(PCmod1b)[sampRows],tempDat$PC1[sampRows],main='Thin-plate'); abline(0,1,col='red')
 # par(mfrow=c(1,1))
 # 
+# #Predicted values
 # dataBoundary %>% st_transform(3401) %>%
 #   st_sample(1000,type='hexagonal') %>%
 #   st_sf() %>%
 #   geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>%  #Louisiana offshore
 #   # st_drop_geometry() %>%
 #   st_transform(4326) %>%
-#   expand_grid(.,doy=c(201,211,222)) %>%
+#   expand_grid(.,doy=c(201,211,221)) %>%
 #   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
 #   dplyr::select(-E,-N) %>%
 #   mutate(predSoap=predict(PCmod1a,newdata=.),predTP=predict(PCmod1b,newdata=.)) %>%
 #   pivot_longer(cols=c(predSoap,predTP)) %>%
-#   ggplot()+geom_sf(aes(geometry=geometry,col=value))+
+#   ggplot()+
+#   geom_sf(aes(geometry=geometry,col=value))+
 #   facet_grid(doy~name)
 # 
-# 
-# #Full model fits
-# # Knots along lines of buffer distances
-# knotLocs <- mapply(function(d,N){
-#   dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
-#   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
-#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
-#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
-#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
-#     st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
-#     st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
-#     st_line_sample(n = N,type='regular') %>% #Samples N points along line
-#     st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
-# },
-# d=c(50,150,225), #Distances
-# N=c(25,15,8) #Points within each distance
-# ) %>%
-#   do.call('c',.)
-# 
-# #Looks OK
-# plot(dataBoundary)
-# plot(knotLocs,add=TRUE,pch=19,cex=0.5)
-# length(knotLocs) #48 knots
-# 
-# #Get knot and boundary locations on same scale
-# bound <- dataBoundary %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
-# bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
-# 
-# kts <- knotLocs %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
-# 
-# library(parallel)
-# cl <- makeCluster(15)
-# 
-# #Per model: ~10 mins for 60 knots, 30 boundary loops, 15 layers for tensor product
-# modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))+
-#   te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))"
-# a <- Sys.time()
-# PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=sDat2,cluster=cl)
-# Sys.time()-a; beep()
-# PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod6 <- bam(formula(gsub('999','PC6',modForm)),knots=kts,data=sDat2,cluster=cl)
+# #Error
+# tempDat %>% 
+#   mutate(errSoap=predict(PCmod1a)-tempDat$PC1,errTP=predict(PCmod1b)-tempDat$PC1) %>% 
+#   st_sf(geom=tempGeom) %>% 
+#   filter(doy==201|doy==211|doy==221) %>% 
+#   # dplyr::select(doy,contains('err')) %>% 
+#   pivot_longer(cols=c(errSoap,errTP)) %>%
+#   ggplot()+
+#   geom_sf(aes(geometry=geom,col=value))+
+#   facet_grid(doy~name)+
+#   scale_color_distiller(palette = 'Spectral')
+
+
+#Full model fits
+# Knots along lines of buffer distances
+knotLocs <- mapply(function(d,N){
+  dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
+  coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
+    st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
+    mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
+    st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
+    st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
+    st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
+    st_line_sample(n = N,type='regular') %>% #Samples N points along line
+    st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
+},
+d=c(50,150,225), #Distances
+N=c(25,15,8) #Points within each distance
+) %>%
+  do.call('c',.)
+
+ggplot() + #Looks OK
+  geom_sf(data=dataBoundary,fill=NA) +
+  geom_sf(data=slice_sample(sDat2,n=5000),alpha=0.3)+
+  geom_sf(data=knotLocs,col='red')
+
+#Get knot and boundary locations on same scale
+bound <- dataBoundary %>% st_transform(3401) %>%
+  st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
+bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
+
+kts <- knotLocs %>% st_transform(3401) %>%
+  st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
+
+library(parallel)
+cl <- makeCluster(15)
+
+#Per model: ~10 mins for 60 knots, 30 boundary loops, 20 layers for tensor product 
+modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,30),d=c(2,1))+
+  te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,30),d=c(2,1))"
+a <- Sys.time()
+PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=sDat2,cluster=cl)
+Sys.time()-a; beep()
+PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=sDat2,cluster=cl)
+PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=sDat2,cluster=cl)
+PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=sDat2,cluster=cl)
+PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=sDat2,cluster=cl)
+PCmod6 <- bam(formula(gsub('999','PC6',modForm)),knots=kts,data=sDat2,cluster=cl)
+stopCluster(cl)
+# # Test against regular thin-plate spline
+# {a <- Sys.time() #5 mins
+#   PCmod1b <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(60,20),d=c(2,1)),
+#                 data=sDat2,cluster=cl)
+#   Sys.time()-a}
 # stopCluster(cl)
-# # # Test against regular thin-plate spline
-# # {a <- Sys.time() #5 mins
-# #   PCmod1b <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(60,20),d=c(2,1)),
-# #                 data=sDat2,cluster=cl)
-# #   Sys.time()-a}
-# # stopCluster(cl)
-# # # mae(PCmod1); mae(PCmod1b) #Soap film smoother slightly better
-# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap_mapping.RData')
+# # mae(PCmod1); mae(PCmod1b) #Soap film smoother slightly better
+save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap_mapping.RData')
 
 load('./data/PCmodsSoap_mapping.RData') #Load soap film smoothers
 

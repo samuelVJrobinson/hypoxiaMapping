@@ -30,9 +30,9 @@ sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2
   mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>% 
   mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>% 
   select(-predPC1:-predPC6) %>% 
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) %>% #~10 seconds
+  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) %>% 
   rename(imputed=gap)
-
+#Takes ~10 seconds
 
 #Fit model of DO to gap-filled PCs ----------------------------------
 
@@ -237,14 +237,20 @@ dayLags <- -NdayForward:NdayLag
 #Matrices to store PCA predictions for past 0:30 days
 predMat <- matrix(NA,nrow=nrow(bottomWDat),ncol=length(dayLags),
                   dimnames=list(bottomWDat$YEID,gsub('-','m',paste0('lag',dayLags))))
-pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat,PCA6=predMat)
+pcaMatList <- list(PCA1=predMat,PCA2=predMat,PCA3=predMat,PCA4=predMat,PCA5=predMat,PCA6=predMat,isImputed=predMat)
 
 for(p in 1:6){ #PCA dimensions
   for(i in 1:nrow(bottomWDat)){ #For each bottom water measurement
     getDays <- bottomWDat$doy[i]:bottomWDat$doy[i]-dayLags #Which days are 0-30 days behind the measurement?
     pcaMatList[[p]][i,] <- sDat %>% filter(sDat$YEID == bottomWDat$YEID[i] & sDat$doy %in% getDays) %>% pull(paste0('PC',p)) 
+    if(p==1){ #On first pass
+      pcaMatList$isImputed[i,] <- sDat %>% filter(sDat$YEID == bottomWDat$YEID[i] & sDat$doy %in% getDays) %>% pull('imputed') #Get info in imputed data
+    }
   }
 }
+sum(pcaMatList$isImputed)/prod(dim(pcaMatList$isImputed)) #71.1% imputed
+plot(jitter(bottomWDat$doy),jitter(apply(pcaMatList$isImputed,1,mean)), #More imputation towards the end of the season
+     xlab='DOY',ylab='Prop imputed',pch=19,cex=0.5)
 
 #Data for functional regression
 fdat <- list(DO_bottom=bottomWDat$DO,

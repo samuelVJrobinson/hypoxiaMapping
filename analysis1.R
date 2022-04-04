@@ -19,147 +19,166 @@ source('helperFunctions.R')
 
 # Load data --------------------
 
-# #Water data from scratch
-# wDat <- read.csv('./data/sample_waterData.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>%
-#   mutate(doy=as.numeric(format(Date,format='%j'))) %>%
-#   # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
-#   group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
-#   select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>%
-#   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326) %>%
-#   geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
-# 
-# Emean <- mean(unique(wDat$E)); Nmean <- mean(unique(wDat$N)) #Center values of E/N, used for scaling
-# 
-# wDat <- wDat %>% 
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   st_transform(4326)
-# 
-# # #All YEIDs are from a single day
-# # wDat %>% st_drop_geometry() %>% group_by(YEID) %>% summarize(nDays=length(unique(Date))) %>% filter(nDays!=1)
-# 
-# # # 2014_003, 2014_149 are different times at the same location
-# # wDat %>% mutate(x=st_coordinates(.)[,1],y=st_coordinates(.)[,2]) %>% unite(loc,x,y) %>% st_drop_geometry() %>% select(YEID,loc) %>%
-# #   distinct() %>% group_by(loc) %>% mutate(n=n()) %>% filter(n>1)
-# 
-# #Get locations from wDat to join onto spatial data
-# locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
-# 
-# #Spectral data
-# # path <- './data/sample_spectralData.csv' #Older dataset (March)
-# path <- './data/sample_spectralData2.csv' #Newer dataset (September)
-# 
-# sDat <- read.csv(path) %>%
-#   left_join(locIndex,by='YEID') %>% #Join in spatial info
-#   select(-Date,-doy) %>%
-#   st_as_sf() %>%
-#   mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-#   mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) #Set upper limit of nflh just below 1
-# 
-# #Set lowest positive number for spectral variables
-# # lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09) #Older values
-# lwrLimits <- apply(st_drop_geometry(sDat)[,3:16],2,function(x) min(x[x>0],na.rm=TRUE)) #Minimum nonzero values
-# names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
-# 
-# sDat <- sDat %>%
-#   #Rescales negative values be above 0.95*minimum positive value
-#   mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
-#   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
-#   mutate(propNA=numNA/max(numNA))
-# 
-# #choose only surface water, using order of depth measurements
-# surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>%
-#   filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
-# 
-# #choose only bottom water
-# bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>%
-#   filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
-# 
-# #PCA imputation of missing data imputation for missing data
-# # Examples: https://link.springer.com/article/10.1007/s11258-014-0406-z
-# # http://juliejosse.com/wp-content/uploads/2018/05/DataAnalysisMissingR.html
-# 
-# #Most measurements are missing 13 or 14 measurements
-# table(sDat$numNA)
-# 
-# #"Most missing" values is chlor_a. Rrs_ values are all missing together
-# apply(st_drop_geometry(select(sDat,chlor_a:sst)),2,function(x) sum(is.na(x)))/nrow(sDat)
-# 
-# #Looks like the missing values split into two clusters
-# hist(sDat$propNA,xlab='Proportion NA values')
-# 
-# #Get all values into a dataframe
-# sDatMat <- sDat %>% st_drop_geometry() %>%
-#   select(YEID:sst,propNA) %>%
-#   unite(ID,YEID,date_img) %>% remove_rownames() %>%
-#   column_to_rownames(var='ID') %>%
-#   filter(propNA<0.3) %>% #Drop rows that have more than 30% of their values missing
-#   select(-propNA) %>%
-#   mutate(across(everything(),log)) #Log-scale variables
-# 
-# # #For complete data (no NAs)
-# # sDatMat_noNA <- as.matrix(sDatMat[apply(sDatMat,1,function(x) sum(is.na(x)))==0,]) #No NA values
-# # pca <- prcomp(sDatMat_noNA,scale. = TRUE)
-# # plot(1:14,cumsum(pca$sdev^2)/sum(pca$sdev^2),xlab='PC',ylab='% Var',pch=19,type='b')
-# # abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
-# # #Singular value decomposition - identical
-# # svdMat <- svd(scale(sDatMat_noNA)) #First 2 dimensions
-# # plot(svdMat$d^2/sum(svdMat$d^2),ylab='Relative variance',xlab='Eigenvalue',pch=19)
-# # plot(cumsum(svdMat$d^2)/sum(svdMat$d^2),ylab='Cumulative variance',xlab='Eigenvalue',pch=19,type='b')
-# # abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
-# # plot(log(pca$sdev),log(svdMat$d)) #Similar things
-# 
-# library(missMDA)
-# # n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes a minute or so
-# # plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
-# sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions
-# 
-# head(sDatMat_imputed$completeObs) #Filled-in data
-# head(sDatMat) #Original data
-# 
-# pca1 <- prcomp(sDatMat_imputed$completeObs,scale=TRUE) #Get PCA values
-# 
-# # Looks like about 6 dims are needed for 95% of variance
-# (p <- data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
-#   ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
-#   labs(x='Principle Component',y='Cumulative Variance')+
-#   geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
-# cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #95% of var in first 6 PCs
-# ggsave('./figures/pcVar.png',p,width=5,height=5)
-# 
-# #Factor loadings of first 6 PCs
-# (p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
-#   pivot_longer(PC1:PC6) %>%
-#   mutate(name=factor(name,labels=paste0('PC',1:6,': ',round(pca1$sdev[1:6]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
-#   mutate(var=factor(var,levels=rev(unique(var)))) %>%
-#   ggplot()+
-#   # geom_point(aes(y=var,x=value))+
-#   geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
-#   facet_wrap(~name)+
-#   labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6'))
-# ggsave('./figures/factorLoadings.png',p,width=10,height=5)
-# 
-# #Make PC scores using center, scale, and rotation matrix
-# sDatMat_imputed$completeObs[1,] #Input data
-# pca1$x[1,] #PC scores (goal)
-# pca1$sdev #sqrt-Eigenvalues
-# pca1$rotation #Factor loadings
-# pca1$center #Mean of original data
-# pca1$scale #SD of original data
-# 
-# #Does this work?
-# ((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
-# pca1$x[1,] #PCs from method
-# (((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
-# 
-# #Join imputed PCA values back to original dataset (NA if no data on that day)
-# sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
-# sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
-#   left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
-# rm(sDat_pca,sDatMat_imputed,sDatMat,p) #cleanup
-# save(bottomWDat,Emean,Nmean,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014_2.Rdata')
+#Note:
+# sample_waterData.csv was used for analyses sets 1 and 2 (spring-fall 2021), sample_waterData3.csv used during spring 2022
+
+#PROBLEM: the two water datasets are different from each other. Ask Yingjie
+
+#Water data from scratch
+wDat <- read.csv('./data/sample_waterData3.csv') %>% mutate(Date=as.Date(Date,'%Y-%m-%d')) %>%
+  mutate(doy=as.numeric(format(Date,format='%j'))) %>%
+  # mutate(YEID=ifelse(YEID=='2014_149','2014_003',YEID)) %>% #Set 2014_149 as 2014_003 (see below)
+  group_by(YEID) %>% mutate(maxDepth=max(Depth,Depth_dem)) %>% mutate(propDepth=Depth/maxDepth) %>%
+  select(-Depth_dem) %>% relocate(YEID:Date,doy,Depth,maxDepth,propDepth,DO,Temp:lon) %>% ungroup() %>%
+  st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326) %>%
+  geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
+
+#Check new data - a bunch in new locations
+# wDat %>% mutate(isNew=grepl('hyp_watch',YEID)) %>% ggplot()+geom_sf(aes(col=isNew,size=isNew))
+
+Emean <- mean(unique(wDat$E)); Nmean <- mean(unique(wDat$N)) #Center values of E/N, used for scaling
+
+wDat <- wDat %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  st_transform(4326)
+
+# #All YEIDs are from a single day
+# wDat %>% st_drop_geometry() %>% group_by(YEID) %>% summarize(nDays=length(unique(Date))) %>% filter(nDays!=1)
+
+# # 2014_003, 2014_149 are different times at the same location
+# wDat %>% mutate(x=st_coordinates(.)[,1],y=st_coordinates(.)[,2]) %>% unite(loc,x,y) %>% st_drop_geometry() %>% select(YEID,loc) %>%
+#   distinct() %>% group_by(loc) %>% mutate(n=n()) %>% filter(n>1)
+
+#Get locations from wDat to join onto spatial data
+locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
+
+#Spectral data
+# path <- './data/sample_spectralData.csv' #Older dataset (March 2021)
+# path <- './data/sample_spectralData2.csv' #Older dataset (September 2021)
+path <- './data/sample_spectralData3.csv' #Newer dataset (March 2022)
+
+sDat <- read.csv(path) 
+
+#Check new values
+sDat$YEID[!sDat$YEID %in% wDat$YEID] %>% unique #Entries in sDat not in wDat - OK
+wDat$YEID[!wDat$YEID %in% sDat$YEID] %>% unique #OK
+locIndex$YEID[!locIndex$YEID %in% sDat$YEID] %>% unique #locIndex entries not in sDat - OK
+locIndex$YEID[!locIndex$YEID %in% wDat$YEID] %>% unique #locIndex entries not in wDat - OK
+
+sDat <- sDat %>% 
+  left_join(locIndex,by='YEID') %>% #Join in spatial info
+  select(-Date,-doy) %>%
+  st_as_sf() %>%
+  mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
+  mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) #Set upper limit of nflh just below 1
+
+#Set lowest positive number for spectral variables
+# lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09) #Older values
+lwrLimits <- apply(st_drop_geometry(sDat)[,3:16],2,function(x) min(x[x>0],na.rm=TRUE)) #Minimum nonzero values
+names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
+
+sDat <- sDat %>%
+  #Rescales negative values be above 0.95*minimum positive value
+  mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
+  mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
+  mutate(propNA=numNA/max(numNA))
+
+#choose only surface water, using order of depth measurements
+surfWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth)) %>% ungroup() %>%
+  filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
+
+#choose only bottom water
+bottomWDat <- wDat %>% group_by(YEID) %>% mutate(depthOrd=order(Depth,decreasing=TRUE)) %>% ungroup() %>%
+  filter(depthOrd==1,Depth<80) %>% select(-depthOrd)
+
+#PCA imputation of missing data imputation for missing data
+# Examples: https://link.springer.com/article/10.1007/s11258-014-0406-z
+# http://juliejosse.com/wp-content/uploads/2018/05/DataAnalysisMissingR.html
+
+#Most measurements are missing 13 or 14 measurements
+table(sDat$numNA)
+
+#"Most missing" values is chlor_a. Rrs_ values are all missing together
+apply(st_drop_geometry(select(sDat,chlor_a:sst)),2,function(x) sum(is.na(x)))/nrow(sDat)
+
+#Looks like the missing values split into two clusters
+hist(sDat$propNA,xlab='Proportion NA values')
+
+#Get all values into a dataframe
+sDatMat <- sDat %>% st_drop_geometry() %>%
+  select(YEID:sst,propNA) %>%
+  unite(ID,YEID,date_img) %>% remove_rownames() %>%
+  column_to_rownames(var='ID') %>%
+  filter(propNA<0.3) %>% #Drop rows that have more than 30% of their values missing
+  select(-propNA) %>%
+  mutate(across(everything(),log)) #Log-scale variables
+
+# #For complete data (no NAs)
+# sDatMat_noNA <- as.matrix(sDatMat[apply(sDatMat,1,function(x) sum(is.na(x)))==0,]) #No NA values
+# pca <- prcomp(sDatMat_noNA,scale. = TRUE)
+# plot(1:14,cumsum(pca$sdev^2)/sum(pca$sdev^2),xlab='PC',ylab='% Var',pch=19,type='b')
+# abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
+# #Singular value decomposition - identical
+# svdMat <- svd(scale(sDatMat_noNA)) #First 2 dimensions
+# plot(svdMat$d^2/sum(svdMat$d^2),ylab='Relative variance',xlab='Eigenvalue',pch=19)
+# plot(cumsum(svdMat$d^2)/sum(svdMat$d^2),ylab='Cumulative variance',xlab='Eigenvalue',pch=19,type='b')
+# abline(h=0.95,col='red') #Looks like about 6 dims are needed for 95% of variance
+# plot(log(pca$sdev),log(svdMat$d)) #Similar things
+
+library(missMDA)
+# n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes about 5 mins
+# plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
+sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions
+
+head(sDatMat) #Original data
+image(as.matrix(sDatMat))
+head(sDatMat_imputed$completeObs) #Filled-in data
+image(as.matrix(sDatMat_imputed$completeObs))
+
+pca1 <- prcomp(sDatMat_imputed$completeObs,scale=TRUE) #Get PCA values
+
+# Looks like about 6 dims are needed for 95% of variance
+(p <- data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
+  ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
+  labs(x='Principle Component',y='Cumulative Variance')+
+  geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
+cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #95% of var in first 6 PCs
+ggsave('./figures/pcVar.png',p,width=5,height=5)
+
+#Factor loadings of first 6 PCs
+(p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
+  pivot_longer(PC1:PC6) %>%
+  mutate(name=factor(name,labels=paste0('PC',1:6,': ',round(pca1$sdev[1:6]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
+  mutate(var=factor(var,levels=rev(unique(var)))) %>%
+  ggplot()+
+  # geom_point(aes(y=var,x=value))+
+  geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
+  facet_wrap(~name)+
+  labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6'))
+ggsave('./figures/factorLoadings.png',p,width=10,height=5)
+
+#Make PC scores using center, scale, and rotation matrix
+sDatMat_imputed$completeObs[1,] #Input data
+pca1$x[1,] #PC scores (goal)
+pca1$sdev #sqrt-Eigenvalues
+pca1$rotation #Factor loadings
+pca1$center #Mean of original data
+pca1$scale #SD of original data
+
+#Check the math...
+((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
+pca1$x[1,] #PCs from method
+(((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
+
+#Join imputed PCA values back to original dataset (NA if no data on that day)
+sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
+sDat <- sDat %>% unite(ID,YEID,date_img,sep='_',remove=FALSE) %>%
+  left_join(sDat_pca,by='ID') %>% select(-ID) %>% mutate(gap=is.na(PC1))
+rm(sDat_pca,sDatMat_imputed,sDatMat,p) #cleanup
+save(bottomWDat,Emean,Nmean,locIndex,pca1,sDat,surfWDat,wDat,lwrLimits,file='./data/all2014_3.Rdata')
 
 #Load data from saved file
-load('./data/all2014_2.Rdata')
+load('./data/all2014_3.Rdata')
 
 # Summary statistics of dataset -----------------------------
 
@@ -380,65 +399,86 @@ pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #
 # summary(PCmod6)
 # par(mfrow=c(1,1))
 
-# #Approach using soap-film smoothers
-# shpfileFolder <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/shapefiles"
-# regionRect <- st_read(paste0(shpfileFolder,"/region_rectangle.shp"))
-# coastBuff <- st_read(paste0(shpfileFolder,"/region_coast250kmBuffer.shp")) %>% st_geometry() #250 km buffer zone away from coast
-# coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% #Actual coast
-#   st_crop(regionRect) %>% #Crop to region
-#   st_geometry()  #Drop other info
-# dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
-# dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
-# 
-# # Knots along lines of buffer distances
-# knotLocs <- mapply(function(d,N){
-#   dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
-#   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
-#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
-#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
-#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
-#     st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
-#     st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
-#     st_line_sample(n = N,type='regular') %>% #Samples N points along line
-#     st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
-# },
-# d=c(50,150,225), #Distances
-# N=c(25,15,8) #Points within each distance
-# ) %>%
-#   do.call('c',.)
-# 
-# #Looks OK
-# plot(dataBoundary)
-# plot(knotLocs,add=TRUE,pch=19,cex=0.5)
-# length(knotLocs) #48 knots
-# 
-# #Get knot and boundary locations on same scale
-# bound <- dataBoundary %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
-# bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
-# 
-# kts <- knotLocs %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
-# 
-# library(parallel)
-# cl <- makeCluster(15)
-#  
-# #Per model: ~10 mins for 60 knots, 30 boundary loops, 15 layers for tensor product
-# modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))+
-#   te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,20),d=c(2,1))"
-# 
-# PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=pcDat,cluster=cl) #About 4.3 mins per model
-# PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=pcDat,cluster=cl)
-# PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=pcDat,cluster=cl)
-# PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=pcDat,cluster=cl)
-# PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=pcDat,cluster=cl)
-# PCmod6 <- bam(formula(gsub('999','PC6',modForm)),knots=kts,data=pcDat,cluster=cl)
-# stopCluster(cl)
-# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap.RData')
+#Approach using soap-film smoothers
+shpfileFolder <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/shapefiles"
+regionRect <- st_read(paste0(shpfileFolder,"/region_rectangle.shp"))
+coastBuff <- st_read(paste0(shpfileFolder,"/region_coast250kmBuffer.shp")) %>% st_geometry() #250 km buffer zone away from coast
+coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% #Actual coast
+  st_crop(regionRect) %>% #Crop to region
+  st_geometry()  #Drop other info
+dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
+dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
+
+# Knots along lines of buffer distances
+knotLocs <- mapply(function(d,N){
+  dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
+  coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
+    st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
+    mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
+    st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
+    st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
+    st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
+    st_line_sample(n = N,type='regular') %>% #Samples N points along line
+    st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
+},
+d=c(50,150,225), #Distances
+N=c(25,15,8) #Points within each distance
+) %>%
+  do.call('c',.)
+
+#Looks OK
+plot(dataBoundary)
+plot(knotLocs,add=TRUE,pch=19,cex=0.5)
+length(knotLocs) #48 knots
+
+#Get knot and boundary locations on same scale
+bound <- dataBoundary %>% st_transform(3401) %>%
+  st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
+bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
+
+kts <- knotLocs %>% st_transform(3401) %>% #Knot locations
+  st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
+
+library(parallel)
+cl <- makeCluster(15)
+
+#Per model: ~10 mins for 60 knots (30 x 2 dims), 30 boundary loops, 15 layers for tensor product
+modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,30),d=c(2,1))+
+  te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,30),d=c(2,1))"
+#First te("sf") is for boundary, second te("sw") is for actual soap film
+
+{a <- Sys.time()
+PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=pcDat,cluster=cl) #About 4.3 mins per model
+Sys.time()-a}
+PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=pcDat,cluster=cl)
+PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=pcDat,cluster=cl)
+PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=pcDat,cluster=cl)
+PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=pcDat,cluster=cl)
+PCmod6 <- bam(formula(gsub('999','PC6',modForm)),knots=kts,data=pcDat,cluster=cl)
+stopCluster(cl)
+save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap.RData')
+
+par(mfrow=c(2,2));
+gam.check(PCmod1); abline(0,1,col='red'); #These look mostly OK
+pcDat %>% mutate(resid=resid(PCmod1))
+
+summary(PCmod1)
+gam.check(PCmod2); abline(0,1,col='red'); #Ehhhh...
+summary(PCmod2)
+gam.check(PCmod3); abline(0,1,col='red');
+summary(PCmod3)
+gam.check(PCmod4); abline(0,1,col='red'); #Not great. Looks more like a t-dist. Poor R2
+summary(PCmod4)
+gam.check(PCmod5); abline(0,1,col='red');
+summary(PCmod5)
+gam.check(PCmod6); abline(0,1,col='red'); #t-dist again
+summary(PCmod6)
+par(mfrow=c(1,1))
+
 
 # load('./data/PCmods.RData') #Load thin plate splines
 load('./data/PCmodsSoap.RData') #Load soap film smoother
