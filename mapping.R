@@ -30,7 +30,6 @@ coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% 
 dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
 dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
 
-
 #Get file paths
 files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>% 
   mutate(file=dir(storage,recursive=TRUE)) %>%
@@ -88,10 +87,12 @@ files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
 Sys.time()-a} #Takes about 2 mins
 names(sDat) <- sapply(sDat,function(x) x$doy[1])
 
-# #Preview day 152
-# sDat[[1]] %>% #Chlor_a on day 152
-#   ggplot(aes(x=x,y=y,fill=chlor_a))+
-#   geom_raster()
+# #Preview day 2
+# sDat[[2]] %>% #sst on day 2
+#   st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
+#   ggplot()+
+#   geom_sf(aes(col=sst))+
+#   geom_sf(data=dataBoundary,fill=NA)
 
 sDat2 <- do.call('rbind',sDat) #Combine into single DF 
 
@@ -112,7 +113,7 @@ round(table(sDat2$numNA)/nrow(sDat2),4) #~50% cells missing all data, ~40% compl
 locs <- dplyr::select(sDat2,x,y) %>% unique() %>% mutate(locID=1:n()) #Locations only
 datMissing <- sDat2$numNA==13 #Locations missing all data
 
-sDat2Miss <- sDat2 %>% filter(datMissing) #Completely missing 
+# sDat2Miss <- sDat2 %>% filter(datMissing) #Completely missing 
 sDat2SomeMiss <- sDat2 %>% filter(numNA!=13,numNA!=0) #Some non missing
 sDat2NoMiss <- sDat2 %>% filter(numNA==0) #No missing
 
@@ -187,8 +188,8 @@ sDat2SomeMiss[which(names(sDat2SomeMiss)=='chlor_a'):which(names(sDat2SomeMiss)=
 rm(sDatMat_imputed); gc() #Cleanup
 
 #Put back into a single dataframe again
-sDat2 <- bind_rows(sDat2Miss,sDat2SomeMiss,sDat2NoMiss) %>% dplyr::select(-numNA) %>% arrange(doy,x,y)
-rm(sDat2Miss,sDat2SomeMiss,sDat2NoMiss,sDatMat,datMissing); gc()
+sDat2 <- bind_rows(sDat2SomeMiss,sDat2NoMiss) %>% dplyr::select(-numNA) %>% arrange(doy,x,y)
+rm(sDat2SomeMiss,sDat2NoMiss,sDatMat,datMissing); gc()
 
 sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form again
 
@@ -239,11 +240,20 @@ sDat2 <- sDat2 %>%
 
 withinBuff <- sDat2 %>% st_intersects(.,dataBoundary) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
 sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
-locLookup <- sDat2 %>% dplyr::select(loc:geometry) %>% unique() #Lookup table for locations
-# ggplot()+geom_sf(dat=dataBoundary)+geom_sf(dat=locLookup)
 
 rm(withinBuff,useThese); gc()
 
+# PC1-3 changes through the year
+# NOTE: Many locations/times are completely missing
+sDat2 %>% 
+  filter(doy=='071'|doy=='141'|doy=='211') %>% 
+  pivot_longer(cols=c(PC1:PC3)) %>% 
+  ggplot()+
+  geom_sf(data=dataBoundary,fill=NA)+
+  geom_sf(aes(col=value))+
+  facet_grid(doy~name)
+
+# ggplot()+geom_sf(dat=dataBoundary)+geom_sf(dat=locLookup)
 
 # Fit PC models -----------------------------------
 
@@ -273,7 +283,6 @@ rm(withinBuff,useThese); gc()
 
 #Approach using soap-film smoothers
 #Testing:
-
 # #Buffer data area - knots can't be too close to boundary
 # dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
 # #Create sampling zones for knots - idea: many close to the coast, fewer further away
@@ -481,6 +490,16 @@ kts <- knotLocs %>% st_transform(3401) %>%
   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
   mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
+
+#Goal: split up sDat2 into manageable chunks for soap film smoothing
+
+sDat2 %>% st_drop_geometry() %>% group_by(doy) %>% 
+  summarize(#propNA=sum(is.na(PC1))/n(),
+            n=n())#,nData=sum(!is.na(PC1))) %>% 
+  mutate(doy=as.numeric(doy)) %>% 
+  ggplot(aes(x=doy,y=propNA))+geom_point()
+  
+
 
 library(parallel)
 cl <- makeCluster(15)

@@ -369,7 +369,8 @@ bottomWDat %>% left_join(mutate(st_drop_geometry(sDat),doy=doy),by=c('YEID','doy
 # Fit GAMs of PC1:PC6 ----------------------------------------------------------
 
 #Get smoothers
-pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% filter(!is.na(PC1)) %>% #Strips out missing data
+pcDat <- sDat %>% select(YEID,date_img,E:geometry) %>% 
+  filter(!is.na(PC1)) %>% #Strips out missing data
   mutate(sE=sE+rnorm(n(),0,0.1),sN=sN+rnorm(n(),0,0.1)) #Add a tiny bit of noise to make sure that distances between points isn't exactly 0
 
 # "Standard" thin-plate spline approach
@@ -428,7 +429,11 @@ N=c(25,15,8) #Points within each distance
 
 #Looks OK
 plot(dataBoundary)
-plot(knotLocs,add=TRUE,pch=19,cex=0.5)
+plot(knotLocs,add=TRUE,pch=19,cex=1)
+
+ggplot()+geom_sf(data=dataBoundary,fill=NA)+
+  geom_sf(data=knotLocs,col='red')+ #Knot locations
+  geom_sf(data=wDat) #Water data
 length(knotLocs) #48 knots
 
 #Get knot and boundary locations on same scale
