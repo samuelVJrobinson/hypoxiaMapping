@@ -15,8 +15,6 @@ editor_options:
 # remove(list = ls())
 
 library(readxl)
-library(XLConnect)
-library(xlsx)
 library(tidyverse)
 library(dplyr)
 library(proj4)
@@ -48,11 +46,11 @@ setwd(dirname(dir)) ## set this parent dir as root dir
 getwd()
 
 ### the data dir ----------------------------------------------------------
-dir.path <- './Dead_Zone_telecoupling/data/DO/DO_GOM/DO_Integrated_Matli_NCSU'
+dir.path <- '../Dead_Zone_telecoupling/data/DO/DO_GOM/DO_Integrated_Matli_NCSU'
 setwd(dir.path)
 getwd()
 
-dir.root <- dirname(dir)
+dir.root   <- dirname(dir) %>% dirname()
 dir.fig    <- paste0(dirname(dir), '/hypoxiaMapping/figures/'); dir.fig
 dir.output <- './data_cleaned/'
 

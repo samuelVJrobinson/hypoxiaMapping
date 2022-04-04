@@ -1,0 +1,203 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+# Set up
+
+```{r Packages and dir, include=FALSE}
+# To clear your environment
+# remove(list = ls())
+
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(proj4)
+library(stringr)
+library(scales)
+library(lubridate)
+
+## data describe
+library(summarytools)
+
+library(sf)
+library(maps)
+library(mapdata)
+
+library(RColorBrewer)
+library(viridis)
+# devtools::install_github("jaredhuling/jcolors")
+library(jcolors)
+
+
+
+### Set work dir ----------------------------------------------------------
+path <- rstudioapi::getSourceEditorContext()$path
+dir  <- dirname(rstudioapi::getSourceEditorContext()$path)
+dir
+dir.root <- dirname(dir)
+setwd(dir.root) ## set this parent dir as root dir
+getwd()
+
+### the data fir
+dir.band    <- './data/data_from_gee/'
+dir.fig     <- paste0(dir.root, '/figures/')
+dir.fig
+dir.cleaned <- paste0(dir.band, 'Img2Table_cleaned/')
+dir.cleaned
+
+
+## keep more decimals
+options(digits = 15)
+options(pillar.sigfig = 15)
+
+### Disable Scientific Notation in R
+options(scipen = 999) # Modify global options in R
+```
+
+
+
+```{r Functions}
+#' Detect outliers using IQR method
+#' 
+#' @param x A numeric vector
+#' @param na.rm Whether to exclude NAs when computing quantiles
+#' 
+is_outlier <- function(x, na.rm = T) {
+  qs = quantile(x, probs = c(0.25, 0.75), na.rm = na.rm)
+
+  lowerq <- qs[1]
+  upperq <- qs[2]
+  iqr = upperq - lowerq 
+
+  extreme.threshold.upper = (iqr * 3) + upperq
+  extreme.threshold.lower = lowerq - (iqr * 3)
+
+  # Return logical vector
+  x > extreme.threshold.upper | x < extreme.threshold.lower
+}
+
+#' Remove rows with outliers in given columns
+#' 
+#' Any row with at least 1 outlier will be removed
+#' 
+#' @param df A data.frame
+#' @param cols Names of the columns of interest. Defaults to all columns.
+#' 
+#' 
+remove_outliers <- function(df, cols = names(df)) {
+  for (col in cols) {
+    cat("Removing outliers in column: ", col, " \n")
+    df <- df[!is_outlier(df[[col]]),]
+  }
+  df
+}
+```
+
+
+
+
+
+# Data
+
+```{r}
+# list.files(path = "./data/data_paper1", pattern = "^sample_2005to2019_pixelValue_withDObottom_2_weekBefore.xlsx", full.names = T, recursive = T)
+
+# xls <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_2_weekBefore.xlsx'); xls
+xls <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_2_10DaysBefore.xlsx'); xls
+
+
+df <- readxl::read_excel(path = xls)
+names(df)
+
+
+dfp <- df %>%
+  dplyr::filter(nchar(YEID) < 15) %>%
+  # dplyr::filter(year >= 2005, year <= 2015) %>%
+  as.data.frame()
+
+
+## remove outliers in spectrum -----------------------------------
+vars_of_interest <- c("chlor_a","nflh","poc","Rrs_412","Rrs_443","Rrs_469",
+                      "Rrs_488","Rrs_531","Rrs_547","Rrs_555", "Rrs_645","Rrs_667","Rrs_678","sst")
+dfp_NOoutliers <- remove_outliers(dfp, vars_of_interest) %>%
+  filter(!is.na(YEID))
+
+
+
+
+dfp <- dfp_NOoutliers
+
+
+
+## data describe -------------------------------------------------
+library(summarytools)
+# dfSummary(df)
+
+dfp %>% 
+  dplyr::select(chlor_a:sst, DO) %>%
+  dfSummary()
+
+hist(dfp$DO)
+```
+
+
+
+
+```{r}
+## scatter plot --------------------------------------------------
+library(ggpmisc)
+my.formula <- y ~ x
+
+dfp %>%
+  dplyr::mutate(var = (chlor_a)) %>%
+  # dplyr::mutate(var = log10(var)) %>%
+  ggplot(aes(x = var, y = DO)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = 'lm',
+              na.rm = T,
+              formula = my.formula) +
+  stat_poly_eq(formula = my.formula, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) +
+  theme_bw()
+
+# fname <- paste0(dir.fig, 'band_correlation_auqa_terr.jpg'); fname
+# ggsave(fname, last_plot(), width = 16, height = 9, dpi = 300, units = 'in')
+
+
+
+  
+### quick visualization using ggpairs (GGally package)----------------
+library(GGally)
+dfp %>%
+  dplyr::select(chlor_a:sst, DO) %>%
+  ggpairs(
+    # lower = list(continuous = wrap("points", color = "black", alpha = 0.5))
+    ) +
+  theme_bw()
+```
+
+
+
+
+```{r}
+### a more advanced way ----------------------------------------------
+lowerFn <- function(data, mapping, method = "lm", ...) {
+  p <- ggplot(data = data, mapping = mapping) +
+    geom_point(colour = "black", alpha = 0.3, shape = 16) +
+    geom_smooth(method = method, color = "red", ...)
+  p
+}
+
+dfp %>% 
+  dplyr::select(chlor_a:sst, DO) %>%
+  ggpairs(
+    lower = list(continuous = wrap(lowerFn, method = "lm"))) + 
+  theme_bw()
+## ref: https://stackoverflow.com/questions/30858337/how-to-customize-lines-in-ggpairs-ggally
+```
+
+
+
+

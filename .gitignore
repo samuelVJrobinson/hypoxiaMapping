@@ -14,3 +14,7 @@ mapping_Li.R
 MS
 shapefiles
 results
+code/*
+data/data_for_gee/
+data/data_from_gee/
+figures/accuracy_testing_rf*

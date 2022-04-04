@@ -41,7 +41,7 @@ load(file = './data/errDat.Rdata')
 
 
 ## 2. load RF model error data --------------------------------------------------------------------
-fname <- paste0('../Dead_Zone_telecoupling/data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
+fname <- paste0('./data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
 load(fname)
 
 acc_set <- 'testing'

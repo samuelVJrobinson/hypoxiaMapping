@@ -147,7 +147,7 @@ fname <- paste0("./data/results/", which_dat, "map_", which_do, '_', date_ini, "
 
 ## Here we take the result from GEE as the reference for testing different methods 
 
-r_name <- '../Dead_Zone_telecoupling/data/data_from_gee/predict_do_maps_lag10d/do_map_20140721.tif'
+r_name <- './data/data_from_gee/predict_do_maps_lag10d/do_map_20140721.tif'
 r <- raster(r_name)
 # r <- brick(r_name)
 r_dz <- func_dz_raster(r = r)
@@ -282,8 +282,9 @@ for (doy_id in doy_ls) {
 getwd()
 
 ## temporal change of dz area in 2014
-csv <- '../Dead_Zone_telecoupling/data/data_from_gee/area_dz_over_time.csv'
-# csv <- '../Dead_Zone_telecoupling/data/data_from_gee/area_dz_over_time_10dLag.csv'
+csv <- './data/data_from_gee/area_dz_over_time.csv'
+# csv <- './data/data_from_gee/area_dz_over_time_10dLag.csv'
+
 area_dz_rf <- read_csv(csv) %>%
   rename_at(vars(starts_with("system")), ~'date') %>%
   dplyr::rename(area = Area) %>%
