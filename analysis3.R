@@ -16,13 +16,14 @@ setwd("~/Documents/hypoxiaMapping")
 source('helperFunctions.R')
 
 #Load data from saved file
-load('./data/all2014_2.Rdata')
+# load('./data/all2014_2.Rdata') #November 2021
+load('./data/all2014_3.Rdata') #Newer - March 2022
 
 #GAM imputation ------------------------------------------
 
 #Load smoothers
 # load('./data/PCmods.RData') #Thin-plate splines
-load('./data/PCmodsSoap.RData') #Soap film
+load('./data/PCmodsSoap.RData') #Soap film - this uses the smoothers fit to the data at each sampling location, not all the spectral data
 
 #Get predictions of PCs at all locations through the entire season. If PC values missing, fill using PC model
 sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.),predPC3=predict(PCmod3,newdata=.)) %>% 
@@ -277,12 +278,11 @@ summary(bWatMod) #R-squared of about 0.61
 par(mfrow=c(2,2)); gam.check(bWatMod); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
 plot(bWatMod,scheme=1,pages=1)
 
-
 #Use smoothPred to get FR plots from each smoother
 pvals <- unname(round(summary(bWatMod)$s.table[,4],3))
 pvals <- ifelse(pvals==0,'<0.001',paste0('=',as.character(pvals)))
 
-p1 <- lapply(1:6,function(i){
+(p1 <- lapply(1:6,function(i){
   d <- expand.grid(dayMat=0:30,p=1) #Dataframe
   names(d)[2] <- paste0('pcaMat',i) #Change name of by variable
   smoothPred(m=bWatMod,dat=d,whichSmooth=i)}) %>% 
@@ -291,7 +291,7 @@ p1 <- lapply(1:6,function(i){
   select(-contains('pcaMat')) %>% 
   ggplot(aes(x=dayMat))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
   geom_line(aes(y=pred))+facet_wrap(~PC)+geom_hline(yintercept=0,col='red',linetype='dashed')+
-  labs(x='Day (lag)',y='Effect')
+  labs(x='Day (lag)',y='Effect'))
 
 p2 <- data.frame(pred=predict(bWatMod),actual=fdat$DO_bottom) %>% 
   ggplot()+geom_point(aes(x=pred,y=actual))+

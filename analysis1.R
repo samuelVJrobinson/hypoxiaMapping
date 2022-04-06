@@ -33,8 +33,12 @@ wDat <- read.csv('./data/sample_waterData3.csv') %>% mutate(Date=as.Date(Date,'%
   st_as_sf(coords=c('lon','lat')) %>% st_set_crs(4326) %>%
   geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
 
-#Check new data - a bunch in new locations
-# wDat %>% mutate(isNew=grepl('hyp_watch',YEID)) %>% ggplot()+geom_sf(aes(col=isNew,size=isNew))
+# #Temporal - new vs old data
+# wDat %>% mutate(hyp=grepl('hyp_watch',YEID)) %>%
+#   ggplot(aes(x=Date,y=DO,col=hyp))+geom_point()
+# #Spatial - new vs old data
+# wDat %>% mutate(hyp=grepl('hyp_watch',YEID)) %>%
+#   ggplot()+geom_sf(aes(col=hyp))
 
 Emean <- mean(unique(wDat$E)); Nmean <- mean(unique(wDat$N)) #Center values of E/N, used for scaling
 
@@ -57,7 +61,7 @@ locIndex <- wDat %>% select(YEID,Date,doy,E:sN,geometry) %>% distinct()
 # path <- './data/sample_spectralData2.csv' #Older dataset (September 2021)
 path <- './data/sample_spectralData3.csv' #Newer dataset (March 2022)
 
-sDat <- read.csv(path) 
+sDat <- read.csv(path)
 
 #Check new values
 sDat$YEID[!sDat$YEID %in% wDat$YEID] %>% unique #Entries in sDat not in wDat - OK
@@ -65,21 +69,19 @@ wDat$YEID[!wDat$YEID %in% sDat$YEID] %>% unique #OK
 locIndex$YEID[!locIndex$YEID %in% sDat$YEID] %>% unique #locIndex entries not in sDat - OK
 locIndex$YEID[!locIndex$YEID %in% wDat$YEID] %>% unique #locIndex entries not in wDat - OK
 
-sDat <- sDat %>% 
+sDat <- sDat %>%
   left_join(locIndex,by='YEID') %>% #Join in spatial info
   select(-Date,-doy) %>%
   st_as_sf() %>%
-  mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j'))) %>%
-  mutate(nflh=ifelse(nflh>(1-1e-5),(1-1e-5),nflh)) #Set upper limit of nflh just below 1
+  mutate(date_img=as.Date(date_img,'%Y-%m-%d'),doy=as.numeric(format(date_img,'%j')))
 
-#Set lowest positive number for spectral variables
-# lwrLimits <- c(0.1026964,1e-05,32.8,1e-09,1e-09,1.8001e-05,0.000452001,0.000770001,0.000822001,0.000566001,1e-09,1e-09,1e-09) #Older values
-lwrLimits <- apply(st_drop_geometry(sDat)[,3:16],2,function(x) min(x[x>0],na.rm=TRUE)) #Minimum nonzero values
+# lwrLimits <- apply(select(st_drop_geometry(sDat),chlor_a:sst),2,function(x) min(x,na.rm=TRUE)) #Minimum values
+lwrLimits <- c(0.01,-0.51,14.8,-0.004,-0.001,-0.0007, 0.000004, 0.0005, 0.0008, 0.0003, -0.002, -0.002, -0.0022, 5.37) #Taken from full dataset
 names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
 
 sDat <- sDat %>%
-  #Rescales negative values be above 0.95*minimum positive value
-  mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x))) %>%
+  # Adds lowest value + 10% if lwrLimits < 0
+  mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>%
   mutate(numNA=apply(st_drop_geometry(.)[,3:16],1,function(x) sum(is.na(x)))) %>% #Count NAs in data columns
   mutate(propNA=numNA/max(numNA))
 
@@ -103,6 +105,14 @@ apply(st_drop_geometry(select(sDat,chlor_a:sst)),2,function(x) sum(is.na(x)))/nr
 
 #Looks like the missing values split into two clusters
 hist(sDat$propNA,xlab='Proportion NA values')
+
+#Distribution of log-values
+sDat %>% st_drop_geometry() %>%
+  select(chlor_a:sst) %>%
+  pivot_longer(everything()) %>% filter(!is.na(value)) %>%
+  mutate(value=log(value)) %>%
+  ggplot()+geom_density(aes(x=value))+
+  facet_wrap(~name,scales='free')
 
 #Get all values into a dataframe
 sDatMat <- sDat %>% st_drop_geometry() %>%
@@ -131,30 +141,31 @@ library(missMDA)
 sDatMat_imputed <- imputePCA(sDatMat,ncp=7,scale=TRUE,method='Regularized') #Impute missing data using 7 dimensions
 
 head(sDatMat) #Original data
-image(as.matrix(sDatMat))
+image(t(as.matrix(sDatMat)))
 head(sDatMat_imputed$completeObs) #Filled-in data
-image(as.matrix(sDatMat_imputed$completeObs))
+image(t(as.matrix(sDatMat_imputed$completeObs)))
 
 pca1 <- prcomp(sDatMat_imputed$completeObs,scale=TRUE) #Get PCA values
 
-# Looks like about 6 dims are needed for 95% of variance
+# Looks like about 4 dims are needed for 95% of variance, 5 gets you ~99%
 (p <- data.frame(pc=1:length(pca1$sdev),cVar=cumsum(pca1$sdev^2)/sum(pca1$sdev^2)) %>%
   ggplot(aes(x=pc,y=cVar))+geom_point()+geom_line()+
   labs(x='Principle Component',y='Cumulative Variance')+
-  geom_hline(yintercept = 0.95,col='red',linetype='dashed'))
-cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #95% of var in first 6 PCs
+  geom_hline(yintercept = c(0.95,0.99),col='red',linetype='dashed')
+  )
+cumsum(pca1$sdev^2)/sum(pca1$sdev^2) #99% of var in first 5 PCs
 ggsave('./figures/pcVar.png',p,width=5,height=5)
 
 #Factor loadings of first 6 PCs
-(p <- pca1$rotation[,1:6] %>% data.frame() %>% rownames_to_column(var='var') %>%
-  pivot_longer(PC1:PC6) %>%
-  mutate(name=factor(name,labels=paste0('PC',1:6,': ',round(pca1$sdev[1:6]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
+(p <- pca1$rotation[,1:5] %>% data.frame() %>% rownames_to_column(var='var') %>%
+  pivot_longer(PC1:PC5) %>%
+  mutate(name=factor(name,labels=paste0('PC',1:5,': ',round(pca1$sdev[1:5]^2/sum(pca1$sdev^2),3)*100,'% Variance'))) %>%
   mutate(var=factor(var,levels=rev(unique(var)))) %>%
   ggplot()+
   # geom_point(aes(y=var,x=value))+
   geom_col(aes(y=var,x=value))+geom_vline(xintercept = 0,col='red',linetype='dashed')+
   facet_wrap(~name)+
-  labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-6'))
+  labs(x='Loading',y=NULL,title='Factor loadings for Principle Components 1-5'))
 ggsave('./figures/factorLoadings.png',p,width=10,height=5)
 
 #Make PC scores using center, scale, and rotation matrix
@@ -166,9 +177,13 @@ pca1$center #Mean of original data
 pca1$scale #SD of original data
 
 #Check the math...
-((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation #Reconstructed PCs
+(((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation) #Calculated
 pca1$x[1,] #PCs from method
 (((sDatMat_imputed$completeObs[1,]-pca1$center)/pca1$scale) %*% pca1$rotation)-pca1$x[1,] #Identical
+
+(((head(sDatMat_imputed$completeObs)-outer(rep(1,6),pca1$center)))/outer(rep(1,6),pca1$scale)) %*% pca1$rotation #Reconstructed
+head(pca1$x) #PCs from method
+(((head(sDatMat_imputed$completeObs)-outer(rep(1,6),pca1$center)))/outer(rep(1,6),pca1$scale)) %*% pca1$rotation - head(pca1$x)
 
 #Join imputed PCA values back to original dataset (NA if no data on that day)
 sDat_pca <- pca1$x[,1:6] %>% as.data.frame() %>% rownames_to_column('ID')
@@ -427,13 +442,15 @@ N=c(25,15,8) #Points within each distance
 ) %>%
   do.call('c',.)
 
-#Looks OK
-plot(dataBoundary)
-plot(knotLocs,add=TRUE,pch=19,cex=1)
+#Looks OK - might want to have more knots near the data-dense locations
+ggplot()+geom_sf(data=dataBoundary,fill=NA)+
+  geom_sf(data=wDat)+ #Water data
+  geom_sf(data=knotLocs,col='red') #Knot locations
 
 ggplot()+geom_sf(data=dataBoundary,fill=NA)+
-  geom_sf(data=knotLocs,col='red')+ #Knot locations
-  geom_sf(data=wDat) #Water data
+  geom_sf(data=distinct(pcDat))+ #Spectral data - same as water data
+  geom_sf(data=knotLocs,col='red') #Knot locations
+
 length(knotLocs) #48 knots
 
 #Get knot and boundary locations on same scale
@@ -456,7 +473,7 @@ modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NU
   te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,30),d=c(2,1))"
 #First te("sf") is for boundary, second te("sw") is for actual soap film
 
-{a <- Sys.time()
+{a <- Sys.time() #Fit models to spectral data at the same locations as the water data
 PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=pcDat,cluster=cl) #About 4.3 mins per model
 Sys.time()-a}
 PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=pcDat,cluster=cl)
@@ -502,14 +519,14 @@ load('./data/PCmodsSoap.RData') #Load soap film smoother
 # Sys.time()-a #8 mins
 # 
 # #Predicted values
-# p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>% 
-#   pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>% 
+# p1 <- predPC %>% select(date,sE,sN,contains('pred')) %>%
+#   pivot_longer(contains('pred')) %>% mutate(name=gsub('pred','',name)) %>%
 #   ggplot()+geom_point(aes(x=sE,y=sN,col=value))+
 #   facet_grid(name~date)+
 #   scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
 #   labs(x='E',y='N',col='PC Value',title='Predicted value')+
 #   theme(legend.position='bottom')
-# 
+
 # #SE of prediction
 # p2 <- predPC %>% select(date,sE,sN,contains('sePC')) %>% 
 #   pivot_longer(contains('sePC')) %>% mutate(name=gsub('sePC','PC',name)) %>% 
@@ -537,7 +554,7 @@ load('./data/PCmodsSoap.RData') #Load soap film smoother
 
 # Fit model of DO to predicted PCs ----------------------------------
 
-#Get predictions of PCs at all locations through the entire season
+#Get predictions of PCs at all locations through the entire season - takes a few minutes
 predPC <- with(pcDat,expand.grid(YEID=unique(YEID),doy=min(doy):max(doy))) %>% 
   left_join(select(locIndex,-doy,-Date),by='YEID') %>% #Join in spatial info
   mutate(PC1=predict(PCmod1,newdata=.),sePC1=predict(PCmod1,newdata=.,se.fit=TRUE)$se.fit) %>%
@@ -659,7 +676,6 @@ par(mfrow=c(2,2)); gam.check(bWatMod2); abline(0,1,col='red'); par(mfrow=c(1,1))
 plot(bWatMod2,scheme=1,pages=1)
 
 #Use smoothPred to get FR plots from each smoother
-
 pvals <- unname(round(summary(bWatMod2)$s.table[,4],3))
 pvals <- ifelse(pvals==0,'<0.001',paste0('=',as.character(pvals)))
 
