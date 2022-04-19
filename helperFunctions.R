@@ -160,3 +160,18 @@ makeTF <- function(d,p){
   tf <- sample(c(rep(T,numT),rep(F,numF)))
   return(tf)
 }  
+
+#Get predictions from reduced model storage (list with coefs, vcv, and smooths)
+predModList <- function(mList,newdat,returnSE=FALSE){
+  #Predictor matrix
+  predMat <- lapply(mList$smooths,function(x){
+    PredictMat(x,data=newdat)}) %>% do.call('cbind',.)  
+  predMat <- cbind(rep(1,nrow(predMat)),predMat) #Intercept column
+  ret <- as.vector(predMat %*% mList$coefs) #Predictions
+  if(returnSE){ #Standard error of prediction
+    se <- sqrt(pmax(0,rowSums(predMat %*% mList$vcv * predMat)))  
+    ret <- cbind(ret,se)
+    colnames(ret) <- c('pred','se')
+  }
+  return(ret)
+}

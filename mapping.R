@@ -30,226 +30,234 @@ coast <- st_read(paste0(shpfileFolder,"/ne_50m_admin_0_countries_USA.shp")) %>% 
 dataBoundary <- st_difference(coastBuff,coast)  #Get boundary of analysis area
 dataBoundary <- st_sfc(st_polygon(dataBoundary[[1]][[2]][1]),crs=st_crs(dataBoundary)) #Get rid of small islands
 
-#Get file paths
-files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>% 
-  mutate(file=dir(storage,recursive=TRUE)) %>%
-  filter(!grepl('combined',paths)) %>% 
-  mutate(file=gsub('.*\\/','',file)) %>% 
-  mutate(doy=as.numeric(gsub('\\.tif','',gsub('[AT]2014','',file)))) %>%
-  dplyr::select(-file) %>% 
-  mutate(platform=ifelse(grepl('terr',paths),'terra','aqua')) %>% 
-  mutate(doy=ifelse(platform=='terra',doy-1,doy)) %>% #Terra starts 1 day earlier
-  mutate(date=format(as.Date(paste0(doy,' 2014'),format='%j %Y'),format='%b %d')) %>%
-  filter(doy>65) %>% #Only use March 6th and beyond
-  pivot_wider(names_from=platform,values_from = paths) %>%
-  mutate(combined=gsub('\\/media.*\\/[AT]','',aqua)) %>% 
-  mutate(combined=gsub('2014','2014_',combined)) %>% 
-  mutate(combined=paste0(newfolder,'/',combined)) %>% 
-  mutate(exists=file.exists(combined)) 
-
-# #Fiddling around with dates
-# as.Date(paste0(files$doy,'-2014'),format='%j-%Y')
-# as.Date('91-2014',format='%j-%Y')
-# format(as.Date(c('May 1 2014', 'Oct 1 2014'),format='%b %d %Y'),format='%j')
-
-# #Create files of average between aqua and terra
-# a <- Sys.time()
-# for(i in 1:nrow(files)){
-#   if(!files$exists[i]){
-#     aquaDat <- brick(files$aqua[i])
-#     terraDat <- brick(files$terra[i])
+# #Get file paths
+# files <-  data.frame(paths=dir(storage,recursive=TRUE,full.names = TRUE)) %>%
+#   mutate(file=dir(storage,recursive=TRUE)) %>%
+#   filter(!grepl('combined',paths)) %>%
+#   mutate(file=gsub('.*\\/','',file)) %>%
+#   mutate(doy=as.numeric(gsub('\\.tif','',gsub('[AT]2014','',file)))) %>%
+#   dplyr::select(-file) %>%
+#   mutate(platform=ifelse(grepl('terr',paths),'terra','aqua')) %>%
+#   mutate(doy=ifelse(platform=='terra',doy-1,doy)) %>% #Terra starts 1 day earlier
+#   mutate(date=format(as.Date(paste0(doy,' 2014'),format='%j %Y'),format='%b %d')) %>%
+#   filter(doy>65) %>% #Only use March 6th and beyond
+#   pivot_wider(names_from=platform,values_from = paths) %>%
+#   mutate(combined=gsub('\\/media.*\\/[AT]','',aqua)) %>%
+#   mutate(combined=gsub('2014','2014_',combined)) %>%
+#   mutate(combined=paste0(newfolder,'/',combined)) %>%
+#   mutate(exists=file.exists(combined))
 # 
-#     newDat <- lapply(1:dim(aquaDat)[3],function(j) calc(stack(aquaDat[[j]],terraDat[[j]]),fun=mean,na.rm=TRUE))
-#     newDat <- brick(newDat)
-#     names(newDat) <- names(aquaDat)
-#     writeRaster(newDat,filename=files$combined[i],format='GTiff')
-#     rm(newDat)
-#     gc()
-#     print(paste0('Created file ',i,' of ',nrow(files)))
+# # #Fiddling around with dates
+# # as.Date(paste0(files$doy,'-2014'),format='%j-%Y')
+# # as.Date('91-2014',format='%j-%Y')
+# # format(as.Date(c('May 1 2014', 'Oct 1 2014'),format='%b %d %Y'),format='%j')
+# 
+# # #Create files of average between aqua and terra
+# # a <- Sys.time()
+# # for(i in 1:nrow(files)){
+# #   if(!files$exists[i]){
+# #     aquaDat <- brick(files$aqua[i])
+# #     terraDat <- brick(files$terra[i])
+# #
+# #     newDat <- lapply(1:dim(aquaDat)[3],function(j) calc(stack(aquaDat[[j]],terraDat[[j]]),fun=mean,na.rm=TRUE))
+# #     newDat <- brick(newDat)
+# #     names(newDat) <- names(aquaDat)
+# #     writeRaster(newDat,filename=files$combined[i],format='GTiff')
+# #     rm(newDat)
+# #     gc()
+# #     print(paste0('Created file ',i,' of ',nrow(files)))
+# #   } else {
+# #     print(paste0('File ',i,' of ',nrow(files),' already exists'))
+# #   }
+# # } #Takes about 6 mins for 30 images
+# 
+# {a <- Sys.time()
+#   sDat <- lapply(files$combined,function(datPath){
+#     cNames <- names(brick(files$aqua[1])) #Channel names
+#     sD <- brick(datPath) #Read data
+#     names(sD) <- cNames #Add names
+#     sD2 <- rasterToPoints(sD) #Convert to point dataframe
+#     nMissing <- apply(sD2[,!grepl('(x|y)',colnames(sD2))],1,function(x) sum(is.na(x))) #Proportion of missing values in each row (cell)
+#     # sD3 <- sD2[nMissing<5,] #Retains records with 4 or more data values
+#     # if(nrow(sD3)==0) sD3 <- rbind(sD3,rep(NA,ncol(sD3)))
+#     sD4 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2], #Day of year
+#                       sD2,numNA=nMissing)
+#     return(sD4)})
+# Sys.time()-a} #Takes about 2 mins
+# names(sDat) <- sapply(sDat,function(x) x$doy[1])
+# 
+# #Preview day 2
+# sDat[[2]] %>% #sst on day 2
+#   st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
+#   ggplot()+
+#   geom_sf(aes(col=sst),size=0.1)+
+#   geom_sf(data=dataBoundary,fill=NA)
+# 
+# sDat2 <- do.call('rbind',sDat) #Combine into single DF
+# 
+# # lwrLimits2 <- apply(dplyr::select(sDat2,chlor_a:sst),2,function(x) min(x,na.rm=TRUE)) #Minimum values from data
+# # names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
+# 
+# sDat2 %>% filter(numNA==0) %>% dplyr::select(chlor_a:sst) %>%
+#   mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>%
+#   slice_sample(n=10000) %>%
+#   pivot_longer(everything()) %>%
+#   mutate(value=log(value)) %>%
+#   ggplot()+geom_density(aes(x=value))+facet_wrap(~name,scales='free')
+# 
+# sDat2 <- sDat2 %>%
+#   # # #Rescales negative values be above 0.95*minimum positive value
+#   # mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x)))
+#   # Adds lowest value + 10% if lwrLimits < 0
+#   mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>%
+#   mutate(across(chlor_a:sst,log)) #Log-scale variables
+# 
+# sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form
+# sDat2$numNA <- apply(sDatMat,1,function(x) sum(is.na(x))) #Get number of NA values
+# round(table(sDat2$numNA)/nrow(sDat2),4) #~50% cells missing all data, ~40% complete
+# datMissing <- sDat2$numNA==13 #Locations missing all data
+# 
+# sDat2SomeMiss <- sDat2 %>% filter(numNA!=13,numNA!=0) #Some non missing
+# sDat2NoMiss <- sDat2 %>% filter(numNA==0) #No missing
+# 
+# sDatMat <- sDat2SomeMiss %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Partly missing data in matrix form
+# 
+# # n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes about 5 mins
+# # plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
+# 
+# #Same as imputePCA, but multicore. Splits X into slices of nPer each, passes to cluster cl, reassembles
+# imputePCA_multi <- function(X,ncp=2,scale=TRUE,method='Regularized',nPer=10000,ncore=10){
+#   # X <- sDatMat #Debugging
+#   # nPer <- 10000
+#   # ncore <- 10
+#   # ncp <- 3
+#   # scale <- TRUE
+#   # method <- 'Regularized'
+# 
+#   #Assign rows to sample strata
+#   sampNum <- c(rep(1:(nrow(X) %/% nPer),each=nPer), #Regular samples
+#     rep((nrow(X) %/% nPer + 1),(nrow(X) %% nPer))) #"Leftovers"
+# 
+#   sampOrd <- sample(1:length(sampNum))
+#   sampNum <- sampNum[sampOrd] #Randomize
+# 
+#   rNames <- rownames(X) #Save rownames
+#   rownames(X) <- 1:nrow(X)
+# 
+#   IP <- function(x,ncp,scale,method) imputePCA(x,ncp,scale,method)$completeObs #Convenience function to pull only 1 matrix from output
+# 
+#   print('Breaking into separate matrices')
+#   X <- lapply(1:max(sampNum),function(x) X[sampNum==x,]) #Break into separate matrices
+#   if(ncore>1){
+#     library(parallel)
+#     cl <- makeCluster(ncore)
+#     print(paste('Running imputePCA across',ncore,'clusters'))
+#     clusterEvalQ(cl,library(missMDA)) #Loads missMDA on each cluster
+#     for(i in 1:(ceiling(length(X)/ncore))){ #Break into sets. Tends to hang on large
+#       use <- ((i-1)*ncore+1):pmin(length(X),(i*ncore)) #Which sets of matrices to use
+#       X[use] <- parLapply(cl=cl,X=X[use],fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+#       cat('.') #Something to look at
+#       # X <- parLapply(cl=cl,X=X,fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+#     }
+#     stopCluster(cl); gc()
 #   } else {
-#     print(paste0('File ',i,' of ',nrow(files),' already exists'))
+#     # X <- lapply(X,IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
+#     times <- rep(NA,length(X))
+#     for(i in 1:length(X)){
+#       a <- Sys.time()
+#       X[[i]] <- IP(X[[i]],ncp=ncp,scale=scale,method=method)
+#       b <- Sys.time()
+#       times[i] <- difftime(b,a,units='secs')
+#       print(paste0('Finished ',i,'. Time: ',round(times[i],2),'. Average time: ',round(mean(times,na.rm=TRUE),2),
+#                    '. Estimated remaining (mins): ',round(mean(times,na.rm=TRUE),2)*(length(X)-i)/60 ))
+#     }
 #   }
-# } #Takes about 6 mins for 30 images
+#   X <- do.call(rbind,X) #Recombine into single matrix
+# 
+#   if(length(rNames)!=nrow(na.omit(X))) stop('NA values still present in dataframe')
+# 
+#   X <- X[order(as.numeric(rownames(X))),] #Reorder
+#   rownames(X) <- rNames #Reset rownames
+# 
+#   print('Done')
+#   return(X)
+# }
+# 
+# #~3 mins
+# sDatMat_imputed <- imputePCA_multi(sDatMat,ncp=5,scale=TRUE,method='Regularized',nPer = 10000,ncore = 15) #Impute missing data using 5 dimensions
+# 
+# sDat2SomeMiss[which(names(sDat2SomeMiss)=='chlor_a'):which(names(sDat2SomeMiss)=='sst')] <- sDatMat_imputed #Rejoin
+# 
+# rm(sDatMat_imputed); gc() #Cleanup
+# 
+# #Put back into a single dataframe
+# sDat2 <- bind_rows(sDat2SomeMiss,sDat2NoMiss) %>% dplyr::select(-numNA) %>% arrange(doy,x,y)
+# rm(sDat2SomeMiss,sDat2NoMiss,sDatMat,datMissing); gc()
+# 
+# sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form again
+# useThese <- unname(which(apply(sDatMat,1,function(x) !any(is.na(x))))) #Rows without missing values
+# 
+# #Decompose to PCs
+# pca1 <- prcomp(sDatMat,scale. = TRUE,retx = FALSE)
+# predict(pca1,sDatMat) %>% cor #Transformed values
+# summary(pca1)
+# 
+# #Matrix to store PC values
+# pcaMat <- matrix(NA,nrow = nrow(sDatMat), ncol=5,dimnames = list(rownames(sDatMat),paste0('PC',1:5)))
+# pcaMat[useThese,] <- predict(pca1,sDatMat)[,1:ncol(pcaMat)] #Store PC values in matrix
+# 
+# sDat2 <- cbind(sDat2,pcaMat) #Combine PCs with sDat2
+# 
+# rm(sDatMat,pcaMat); gc()
+# 
+# #Add coordinate system - takes a minute or so
+# sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>%
+#   dplyr::select(-chlor_a:-sst) %>% #Remove raw data, keep PCs
+#   st_set_crs(4326) %>%
+#   geom2cols(E,N,removeGeom=FALSE,epsg=3401) #AB UTM
+# 
+# Emean <- mean(unique(sDat2$E)); Nmean <- mean(unique(sDat2$N)) #Center values of E/N, used for scaling
+# 
+# sDat2 <- sDat2 %>%
+#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+#   mutate(across(E:N,~round(.x))) %>%
+#   st_transform(4326) %>% unite(loc,E,N) %>% #Back to WGS84
+#   mutate(loc=as.numeric(factor(loc)))
+# 
+# withinBuff <- sDat2 %>% st_intersects(.,dataBoundary) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
+# sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
+# 
+# locs <- dplyr::select(sDat2,loc,sE,sN) %>% unique() #Unique locations in spectral data
+# 
+# # st_distance(locs[1:500,]) %>% data.frame() %>% dplyr::select(X1) %>%
+# #   mutate(X1=as.numeric(X1)) %>%
+# #   filter(X1!=0) %>% filter(X1==min(X1)) #Minimum nonzero distance is ~4km
+# 
+# rm(withinBuff,useThese); gc()
+# 
+# save(pca1,file='./data/PCAvals.Rdata') #pca values
+# save(sDat,file = "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata/sDat_raw.Rdata") #raw rasters
+# #sf dataframe, plus other info
+# save(sDat2,locs,Emean,Nmean,
+#      file = "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata/sDat2.Rdata")
 
-{a <- Sys.time()
-  sDat <- lapply(files$combined,function(datPath){
-    cNames <- names(brick(files$aqua[1])) #Channel names
-    sD <- brick(datPath) #Read data
-    names(sD) <- cNames #Add names
-    sD2 <- rasterToPoints(sD) #Convert to point dataframe
-    nMissing <- apply(sD2[,!grepl('(x|y)',colnames(sD2))],1,function(x) sum(is.na(x))) #Proportion of missing values in each row (cell)
-    # sD3 <- sD2[nMissing<5,] #Retains records with 4 or more data values
-    # if(nrow(sD3)==0) sD3 <- rbind(sD3,rep(NA,ncol(sD3)))
-    sD4 <- data.frame(doy=strsplit(x = datPath,split = c("(\\_|\\.)"))[[1]][2], #Day of year
-                      sD2,numNA=nMissing) 
-    return(sD4)})
-Sys.time()-a} #Takes about 2 mins
-names(sDat) <- sapply(sDat,function(x) x$doy[1])
-
-#Preview day 2
-sDat[[2]] %>% #sst on day 2
-  st_as_sf(coords=c('x','y')) %>% st_set_crs(4326) %>%
-  ggplot()+
-  geom_sf(aes(col=sst),size=0.1)+
-  geom_sf(data=dataBoundary,fill=NA)
-
-sDat2 <- do.call('rbind',sDat) #Combine into single DF 
-
-# lwrLimits2 <- apply(dplyr::select(sDat2,chlor_a:sst),2,function(x) min(x,na.rm=TRUE)) #Minimum values from data
-# names(lwrLimits) <- c('chlor_a','nflh','poc','Rrs_412','Rrs_443','Rrs_469','Rrs_488','Rrs_531','Rrs_547','Rrs_555','Rrs_645','Rrs_667','Rrs_678','sst')
-
-sDat2 %>% filter(numNA==0) %>% dplyr::select(chlor_a:sst) %>% 
-  mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>% 
-  slice_sample(n=10000) %>% 
-  pivot_longer(everything()) %>% 
-  mutate(value=log(value)) %>%
-  ggplot()+geom_density(aes(x=value))+facet_wrap(~name,scales='free')
-
-sDat2 <- sDat2 %>% 
-  # # #Rescales negative values be above 0.95*minimum positive value
-  # mutate(across(chlor_a:sst,~ifelse(.x<lwrLimits[names(lwrLimits)==cur_column()],lwrLimits[names(lwrLimits)==cur_column()]*0.95,.x)))
-  # Adds lowest value + 10% if lwrLimits < 0
-  mutate(across(names(lwrLimits[lwrLimits<0]),~.x-(min(.x,na.rm=TRUE)*1.1))) %>% 
-  mutate(across(chlor_a:sst,log)) #Log-scale variables
-
-sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form
-sDat2$numNA <- apply(sDatMat,1,function(x) sum(is.na(x))) #Get number of NA values
-round(table(sDat2$numNA)/nrow(sDat2),4) #~50% cells missing all data, ~40% complete
-datMissing <- sDat2$numNA==13 #Locations missing all data
-
-sDat2SomeMiss <- sDat2 %>% filter(numNA!=13,numNA!=0) #Some non missing
-sDat2NoMiss <- sDat2 %>% filter(numNA==0) #No missing
-
-sDatMat <- sDat2SomeMiss %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Partly missing data in matrix form
-
-# n_components <- estim_ncpPCA(sDatMat, verbose = TRUE,method="Regularized",method.cv="gcv",ncp.min=1,ncp.max=13) #Takes about 5 mins
-# plot(1:13,n_components$criterion,xlab='Number of Dimensions',ylab='GCV Criterion',type='b',pch=19) #Looks like about 7 components is OK for prediction
-
-#Same as imputePCA, but multicore. Splits X into slices of nPer each, passes to cluster cl, reassembles
-imputePCA_multi <- function(X,ncp=2,scale=TRUE,method='Regularized',nPer=10000,ncore=10){
-  # X <- sDatMat #Debugging
-  # nPer <- 10000
-  # ncore <- 10
-  # ncp <- 3
-  # scale <- TRUE
-  # method <- 'Regularized'
-  
-  #Assign rows to sample strata
-  sampNum <- c(rep(1:(nrow(X) %/% nPer),each=nPer), #Regular samples
-    rep((nrow(X) %/% nPer + 1),(nrow(X) %% nPer))) #"Leftovers"
-  
-  sampOrd <- sample(1:length(sampNum))
-  sampNum <- sampNum[sampOrd] #Randomize
-  
-  rNames <- rownames(X) #Save rownames
-  rownames(X) <- 1:nrow(X)
-  
-  IP <- function(x,ncp,scale,method) imputePCA(x,ncp,scale,method)$completeObs #Convenience function to pull only 1 matrix from output
-  
-  print('Breaking into separate matrices')
-  X <- lapply(1:max(sampNum),function(x) X[sampNum==x,]) #Break into separate matrices
-  if(ncore>1){
-    library(parallel)
-    cl <- makeCluster(ncore)
-    print(paste('Running imputePCA across',ncore,'clusters'))
-    clusterEvalQ(cl,library(missMDA)) #Loads missMDA on each cluster
-    for(i in 1:(ceiling(length(X)/ncore))){ #Break into sets. Tends to hang on large 
-      use <- ((i-1)*ncore+1):pmin(length(X),(i*ncore)) #Which sets of matrices to use
-      X[use] <- parLapply(cl=cl,X=X[use],fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
-      cat('.') #Something to look at
-      # X <- parLapply(cl=cl,X=X,fun=IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
-    }
-    stopCluster(cl); gc()
-  } else {
-    # X <- lapply(X,IP,ncp=ncp,scale=scale,method=method) #Run imputePCA on separate matrices
-    times <- rep(NA,length(X))
-    for(i in 1:length(X)){
-      a <- Sys.time()
-      X[[i]] <- IP(X[[i]],ncp=ncp,scale=scale,method=method)
-      b <- Sys.time()
-      times[i] <- difftime(b,a,units='secs')
-      print(paste0('Finished ',i,'. Time: ',round(times[i],2),'. Average time: ',round(mean(times,na.rm=TRUE),2), 
-                   '. Estimated remaining (mins): ',round(mean(times,na.rm=TRUE),2)*(length(X)-i)/60 ))
-    } 
-  }
-  X <- do.call(rbind,X) #Recombine into single matrix
-  
-  if(length(rNames)!=nrow(na.omit(X))) stop('NA values still present in dataframe')
-  
-  X <- X[order(as.numeric(rownames(X))),] #Reorder
-  rownames(X) <- rNames #Reset rownames
-  
-  print('Done')
-  return(X)
-}
-
-#~3 mins
-sDatMat_imputed <- imputePCA_multi(sDatMat,ncp=5,scale=TRUE,method='Regularized',nPer = 10000,ncore = 15) #Impute missing data using 5 dimensions
-
-sDat2SomeMiss[which(names(sDat2SomeMiss)=='chlor_a'):which(names(sDat2SomeMiss)=='sst')] <- sDatMat_imputed #Rejoin
-
-rm(sDatMat_imputed); gc() #Cleanup
-
-#Put back into a single dataframe
-sDat2 <- bind_rows(sDat2SomeMiss,sDat2NoMiss) %>% dplyr::select(-numNA) %>% arrange(doy,x,y)
-rm(sDat2SomeMiss,sDat2NoMiss,sDatMat,datMissing); gc()
-
-sDatMat <- sDat2 %>% dplyr::select(chlor_a:sst) %>% as.matrix() #Data in matrix form again
-useThese <- unname(which(apply(sDatMat,1,function(x) !any(is.na(x))))) #Rows without missing values
-
-#Decompose to PCs
-pca1 <- prcomp(sDatMat,scale. = TRUE,retx = FALSE) 
-predict(pca1,sDatMat) %>% cor #Transformed values
-summary(pca1)
-save(pca1,file='./data/PCAvals.Rdata') #Save PCA values to use elsewhere
-
-#Matrix to store PC values
-pcaMat <- matrix(NA,nrow = nrow(sDatMat), ncol=5,dimnames = list(rownames(sDatMat),paste0('PC',1:5)))
-pcaMat[useThese,] <- predict(pca1,sDatMat)[,1:ncol(pcaMat)] #Store PC values in matrix
-
-sDat2 <- cbind(sDat2,pcaMat) #Combine PCs with sDat2 
-
-rm(sDatMat,pcaMat); gc()
-
-#Add coordinate system - takes a minute or so
-sDat2 <- sDat2 %>% st_as_sf(coords=c('x','y')) %>% 
-  dplyr::select(-chlor_a:-sst) %>% #Remove raw data, keep PCs
-  st_set_crs(4326) %>%
-  geom2cols(E,N,removeGeom=FALSE,epsg=3401) #Louisiana offshore
-
-Emean <- mean(unique(sDat2$E)); Nmean <- mean(unique(sDat2$N)) #Center values of E/N, used for scaling
-
-sDat2 <- sDat2 %>% 
-  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-  mutate(across(E:N,~round(.x))) %>% 
-  st_transform(4326) %>% unite(loc,E,N) %>% 
-  mutate(loc=as.numeric(factor(loc)))
-
-withinBuff <- sDat2 %>% st_intersects(.,dataBoundary) %>% sapply(.,function(x) length(x)>0) #Points in sDat2 that are outside of the buffer
-sDat2 <- sDat2 %>% filter(withinBuff) #Filter out points outside of buffer
-
-locs <- dplyr::select(sDat2,loc,sE,sN) %>% unique() #Unique locations in spectral data
+load('./data/PCAvals.Rdata')
+load("/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata/sDat2.Rdata")
 
 bottomWDat <- bottomWDat %>% mutate( #Match closest unique location in spectral data
   loc=apply(st_distance(bottomWDat,locs),1,which.min),
   minDist=apply(st_distance(bottomWDat,locs),1,min)) %>% 
-  mutate(loc=ifelse(minDist>4000,NA,loc))
+  mutate(loc=ifelse(minDist>4000,NA,loc)) #Set nearest to NA if distance < 4 km (no matching cell)
 
-# st_distance(locs[1:500,]) %>% data.frame() %>% dplyr::select(X1) %>% 
-#   mutate(X1=as.numeric(X1)) %>% 
-#   filter(X1!=0) %>% filter(X1==min(X1)) #Minimum nonzero distance is ~4km
-  
-rm(withinBuff,useThese); gc()
-
-# PC1-3 changes through the year
-# NOTE: Many locations/times are completely missing
-sDat2 %>% 
-  filter(doy=='071'|doy=='141'|doy=='211') %>% 
-  pivot_longer(cols=c(PC1:PC5)) %>% 
-  ggplot()+
-  geom_sf(data=dataBoundary,fill=NA)+
-  geom_sf(aes(col=value),size=0.1)+
-  facet_grid(doy~name)
+# # PC1-3 changes through the year
+# # NOTE: Many locations/times are completely missing
+# sDat2 %>% 
+#   filter(doy=='071'|doy=='141'|doy=='211') %>% 
+#   pivot_longer(cols=c(PC1:PC5)) %>% 
+#   ggplot()+
+#   geom_sf(data=dataBoundary,fill=NA)+
+#   geom_sf(aes(col=value),size=0.1)+
+#   facet_grid(doy~name)
 
 # ggplot()+geom_sf(dat=dataBoundary)+geom_sf(dat=locLookup)
 
@@ -453,7 +461,6 @@ sDat2 %>%
 #   facet_grid(doy~name)+
 #   scale_color_distiller(palette = 'Spectral')
 
-
 #Full model fits
 # Knots along lines of buffer distances
 knotLocs <- mapply(function(d,N){
@@ -492,7 +499,7 @@ kts <- knotLocs %>% st_transform(3401) %>%
 
 #Goal: split up sDat2 into manageable chunks for soap film smoothing
 
-#Breaks for 10 splits in data
+#Breaks for 5 chunks of data
 doyBreaks <- sDat2 %>% slice(c(1,(nrow(sDat2) %/% 5)*c(1:5))) %>% pull(doy) %>% as.numeric
 
 sDat2 %>% st_drop_geometry() %>% group_by(doy) %>% 
@@ -500,29 +507,99 @@ sDat2 %>% st_drop_geometry() %>% group_by(doy) %>%
             n=n()) %>% 
   mutate(doy=as.numeric(doy)) %>% 
   ggplot(aes(x=doy,y=n))+geom_point()+
-  geom_vline(xintercept = doyBreaks)
+  geom_vline(xintercept = doyBreaks)+labs(x='DOY',y='Number of points')
 
-sDat2 <- sDat2 %>% 
+sDat2 <- sDat2 %>% #Add split data, convert DOY to numeric
   mutate(doySplit=cut(as.numeric(doy),breaks=doyBreaks,include.lowest=TRUE)) %>% 
   mutate(doy=as.numeric(doy))
 
-sDatList <- lapply(levels(sDat2$doySplit),function(x){
+sDatList <- lapply(levels(sDat2$doySplit),function(x){ #Divide into separate data chunks
   sDat2 %>% 
-    # st_drop_geometry() %>%
+    st_drop_geometry() %>%
+    mutate(across(c(sE,sN),unname)) %>% 
     filter(doySplit==x) %>% 
     dplyr::select(-doySplit)
 })
-
-library(parallel)
-cl <- makeCluster(15)
 
 #Per model: ~5 mins for 83 knots, 40 boundary loops, 10 layers for tensor product 
 modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(40,10),d=c(2,1))+
   te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(40,10),d=c(2,1))"
 #First te("sf") is for boundary, second te("sw") is for actual soap film
-a <- Sys.time()
-PCmod1 <- bam(formula(gsub('999','PC1',modForm)),knots=kts,data=sDatList[[1]],cluster=cl)
-# Sys.time()-a; beep() 
+
+storageDir <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/models/"
+for(chunk in 1:(length(doyBreaks)-1)){ #For each chunk of data
+  for(pc in 1:5){ #For each PC
+    tempDat <- sDatList[[chunk]]
+    library(parallel)
+    cl <- makeCluster(15)
+    PCmod1 <- bam(formula(gsub('999',paste0('PC',pc),modForm)), knots=kts, data=tempDat, cluster=cl)  
+    stopCluster(cl)
+    
+    #Save coefficients
+    modList <- list(coefs=coef(PCmod1), #Coefficients
+                    vcv=vcov(PCmod1), #Covariance matrix
+                    smooths=PCmod1$smooth) #Smooth specifications
+    save(modList,file = paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata")) 
+    
+    #Diagnostics
+    #https://stackoverflow.com/questions/45918662/plot-gam-from-mgcv-with-all-terms-true-within-a-function
+    png(paste0(storageDir,'summary',chunk,"_pc",pc,".png"),width=12,height=6,units='in',res=200)
+    # plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=TRUE)
+    plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=FALSE)
+    dev.off()
+    
+    #Residual plots
+    actual <- tempDat[,paste0('PC',pc)]
+    res <- residuals(PCmod1,type = 'pearson')
+    devRes <- residuals(PCmod1,type='deviance')
+    pred <- predict(PCmod1)
+    fit <- fitted(PCmod1)
+    if(length(devRes)>10000){
+      samp <- sample(1:length(devRes),10000) #Sub-samples to 10000
+      devRes <- devRes[samp]; pred <- pred[samp]; fit <- fit[samp]; res <- res[samp]; actual <- actual[samp]
+    } 
+    
+    #Residuals
+    png(paste0(storageDir,'residuals',chunk,"_pc",pc,".png"),width=8,height=8,units='in',res=200)
+    par(mfrow=c(2,2))
+    qqnorm(devRes,main='Deviance residuals Q-Q'); qqline(devRes)
+    plot(fit,res,xlab='Fitted',ylab='Resid',main='Fitted vs Residual'); abline(h=0,col='red')
+    hist(devRes,main='Deviance residuals')
+    plot(actual,pred,xlab='Actual',ylab='Predicted',main='Actual vs Predicted'); abline(0,1,col='red')
+    dev.off()
+    par(mfrow=c(1,1))
+    
+    capture.output({ #Model summary
+      print("SUMMARY---------------------------------")
+      summary(PCmod1) 
+    },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"))
+    # capture.output({ #GAM check results
+    #   print(" ")
+    #   print("GAM.CHECK-------------------------------")
+    #   k.check(PCmod1)# Runs into problems here. I don't think this work for soap film smoothers
+    # },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"),append=TRUE) 
+  }
+}
+
+predDat <- expand_grid(doy=c(66,77,88,99),kts)
+
+predDat <- matrix(
+  c(98,-408.8168,-365.7818,
+  98,-439.7257,-364.7678,
+  98,-451.3474,-364.5414,
+  98,-466.6571,-326.5940),
+  ncol=3,byrow = TRUE,dimnames = list(NULL,c('doy','sE','sN'))
+) %>% data.frame
+
+predict(PCmod1,newdata=predDat) #Doesn't work
+predModList(modList,newdat = predDat) #Also doesn't work
+
+tempDat %>% ggplot(aes(x=sE,y=sN))+geom_point()+
+  geom_point(data=predDat,col='red')
+
+
+# ggplot(predDat,aes(x=sE,y=sN,col=y))+geom_point()+facet_wrap(~doy)+
+#   scale_colour_distiller(palette='RdBu',direction = -1)
 
 # #OK, but not perfect. Looks like the spatial scale of the process is pretty small
 # #Turbulence patterns would probably have to have some kind of dynamic model

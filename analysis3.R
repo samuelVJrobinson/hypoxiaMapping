@@ -17,23 +17,161 @@ source('helperFunctions.R')
 
 #Load data from saved file
 # load('./data/all2014_2.Rdata') #November 2021
-load('./data/all2014_3.Rdata') #Newer - March 2022
 
 #GAM imputation ------------------------------------------
 
 #Load smoothers
 # load('./data/PCmods.RData') #Thin-plate splines
-load('./data/PCmodsSoap.RData') #Soap film - this uses the smoothers fit to the data at each sampling location, not all the spectral data
+# load('./data/PCmodsSoap.RData') #Soap film - this uses the smoothers fit to the data at each sampling location, not all the spectral data
+load('./data/all2014_3.Rdata') #Newer - March 2022, sDat here contains only spectral data from water-testing locations
+load('./data/PCAvals.Rdata')
+load("/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/ATdata/sDat2.Rdata") #All spectral data
+
+# > Emean #Currently
+# [1] 2277503
+# > Nmean
+# [1] 3382200
+# > Emean #Should be...
+# [1] 2570555
+# > Nmean
+# [1] 3329257
+
+storageDir <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/models/"
+doyBreaks <- sDat2 %>% slice(c(1,(nrow(sDat2) %/% 5)*c(1:5))) %>% pull(doy) %>% as.numeric
+
+bottomWDat <- bottomWDat %>% mutate( #Match closest unique location in spectral data
+  loc=apply(st_distance(bottomWDat,locs),1,which.min),
+  minDist=apply(st_distance(bottomWDat,locs),1,min)) %>% 
+  mutate(loc=ifelse(minDist>4000,NA,loc)) %>% #Set nearest to NA if distance < 4 km (no matching cell)
+  filter(!is.na(loc)) %>% 
+  mutate(chunk=as.numeric(cut(as.numeric(doy),breaks=doyBreaks,label=1:5,include.lowest=TRUE))) %>% 
+  select(-E,-N,-sE,-sN) %>%
+  geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>%
+  mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
+  st_transform(4326) #Back to WGS84
+
+sDat2 <- sDat2 %>% mutate(chunk=as.numeric(cut(as.numeric(doy),breaks=doyBreaks,label=1:5,include.lowest=TRUE)))
+
+# #Check alignment
+# sDat2 %>% slice_sample(n=10000) %>%
+#   ggplot()+geom_sf()+
+#   geom_sf(data=bottomWDat,col='red')
+# 
+# sDat2 %>% slice_sample(n=10000) %>%
+#   geom2cols(E2,N2,removeGeom=FALSE,epsg=3401) %>%
+#   ggplot(aes(x=E2,y=N2))+geom_point()+
+#   geom_point(data=geom2cols(bottomWDat,E2,N2,removeGeom=FALSE,epsg=3401),col='red')
+# 
+# sDat2 %>% slice_sample(n=10000) %>%
+#   ggplot(aes(x=sE,y=sN))+geom_point()+
+#   geom_point(data=bottomWDat,col='red')
 
 #Get predictions of PCs at all locations through the entire season. If PC values missing, fill using PC model
-sDat <- sDat %>% mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.),predPC3=predict(PCmod3,newdata=.)) %>% 
-  mutate(predPC4=predict(PCmod4,newdata=.),predPC5=predict(PCmod5,newdata=.),predPC6=predict(PCmod6,newdata=.)) %>% 
-  mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>% 
-  mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>% 
-  select(-predPC1:-predPC6) %>% 
-  mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) %>% 
-  rename(imputed=gap)
-#Takes ~10 seconds
+lags <- 0:80 #Use lag days of 0-80
+
+#Storage matrices for PC data
+sDatList <- lapply(1:5,function(x) matrix(NA,nrow=nrow(bottomWDat),ncol=length(lags),dimnames=list(bottomWDat$YEID,paste0('L',lags)))) %>% 
+  set_names(nm=paste0('PC',1:5))
+
+{
+  pb <- txtProgressBar(style=3)
+  for(i in 1:nrow(bottomWDat)){ #Gets existing data
+    if(bottomWDat$loc[i] %in% sDat2$loc){
+      sDat2Loc <- st_drop_geometry(sDat2[sDat2$loc==bottomWDat$loc[i],])
+      sDat2Loc$lag <- bottomWDat$doy[i]-as.numeric(sDat2Loc$doy)
+      sDat2Loc <- sDat2Loc[sDat2Loc$lag %in% lags,]
+      if(nrow(sDat2Loc)!=0){
+        for(pc in 1:5){ #For each PC
+          for(lagDay in 1:nrow(sDat2Loc)){
+            sDatList[[pc]][i,sDat2Loc$lag[lagDay]] <- sDat2Loc[lagDay,paste0('PC',pc)]
+          }
+        }
+      }
+    } 
+    setTxtProgressBar(pb,i/nrow(bottomWDat))
+  }
+  close(pb)
+}
+
+imputed <- is.na(sDatList[[1]]) #Are variables imputed?
+
+for(ch in 1:(length(doyBreaks)-1)){ #For each chunk
+  doyRange <- doyBreaks[c(ch,ch+1)] #Range of days used in this chunk
+  modPaths <- dir(storageDir,pattern = paste0('modList',ch),full.names = TRUE) #Paths to models
+  modList <- lapply(modPaths,function(x){load(x); return(modList)}) #Load models into list
+  
+  dayMat <- t(sapply(bottomWDat$doy,function(x) x-lags)) #Matrix of days matching lag day values for each location
+  eMat <- outer(bottomWDat$sE,rep(1,length(lags))) #Matrix of E and N indices
+  nMat <- outer(bottomWDat$sN,rep(1,length(lags)))
+  useMat <- dayMat>=doyRange[1] & dayMat<doyRange[2] & is.na(sDatList[[1]]) #Matrix of days/locations to get values for, excluding existing values
+  predDF <- data.frame(doy=dayMat[useMat],sE=eMat[useMat],sN=nMat[useMat]) #DF to use for prediction
+  
+  predDF <- lapply(modList,predModList,newdat=predDF) %>% #Get predictions
+    set_names(nm = paste0('PC',1:5)) %>% 
+    bind_cols() %>% bind_cols(predDF,.)
+  for(pc in 1:5) sDatList[[pc]][useMat] <- predDF[,paste0('PC',pc)]
+}
+
+sDatList[[1]][1:10,1:10] #Works
+
+sDat <- sDatList[[1]] %>% as.data.frame() %>% rownames_to_column('YEID') %>% 
+  mutate(doy=bottomWDat$doy) %>% 
+  st_sf(geometry=bottomWDat$geometry) %>% 
+  pivot_longer(c(-YEID,-doy,-geometry)) %>% rename(lag=name) %>% 
+  mutate(lag=as.numeric(gsub('L','',lag)))
+
+sDat <- imputed %>% as.data.frame() %>% rownames_to_column('YEID') %>% 
+  pivot_longer(c(-YEID),values_to = 'imputed') %>% rename(lag=name) %>% 
+  mutate(lag=as.numeric(gsub('L','',lag))) %>% select(imputed) %>% 
+  bind_cols(sDat,.)
+
+sDat <- lapply(sDatList,function(x){
+  x %>% as.data.frame() %>% rownames_to_column('YEID') %>% 
+    pivot_longer(-YEID) %>% rename(lag=name) %>% 
+    mutate(lag=as.numeric(gsub('L','',lag))) %>% 
+    pull(value)}) %>% bind_cols(sDat,.)
+
+sDat <- sDat %>% mutate(doy=doy-lag) %>% select(-lag) %>% 
+  mutate(date=as.Date(paste('2014',round(doy),sep='-'),format='%Y-%j'))
+  
+# Simple feature collection with 6 features and 31 fields
+# Geometry type: POINT
+# Dimension:     XY
+# Bounding box:  xmin: -90.4885 ymin: 28.86829 xmax: -90.4885 ymax: 28.86829
+# Geodetic CRS:  WGS 84
+# YEID   date_img  chlor_a     nflh   poc     Rrs_412     Rrs_443     Rrs_469     Rrs_488     Rrs_531     Rrs_547     Rrs_555     Rrs_645     Rrs_667
+# 1 2014_003 2014-03-01 4.758067       NA 454.6 0.001176001 0.001880001 0.002586001 0.002994001 0.004096001 0.004178001 0.003972001 0.001202001 0.001074001
+# 2 2014_003 2014-03-02 4.478153 0.276895 358.6 0.003136001 0.003690001 0.004226001 0.004676001 0.006134001 0.006408001 0.006132001 0.002340001 0.001988001
+# 3 2014_003 2014-03-03       NA       NA    NA          NA          NA          NA          NA          NA          NA          NA          NA          NA
+# 4 2014_003 2014-03-04       NA       NA    NA          NA          NA          NA          NA          NA          NA          NA          NA          NA
+# 5 2014_003 2014-03-05       NA       NA    NA          NA          NA          NA          NA          NA          NA          NA          NA          NA
+# 6 2014_003 2014-03-06       NA       NA    NA          NA          NA          NA          NA          NA          NA          NA          NA          NA
+# Rrs_678     sst       E       N      sE       sN doy numNA     propNA        PC1         PC2        PC3        PC4       PC5        PC6 imputed
+# 1 0.001130001 17.6775 2428422 3453187 166.062 26.40301  60     1 0.07142857 -1.0428603  1.39952665 -1.1327299 -1.2409155 0.1313434 0.18691682   FALSE
+# 2 0.002008001 18.4100 2428422 3453187 166.062 26.40301  61     0 0.00000000 -2.3907936 -0.03003929 -1.0807290 -0.8893966 0.1779272 0.06840157   FALSE
+# 3          NA      NA 2428422 3453187 166.062 26.40301  62    14 1.00000000 -0.5273853  0.30769164 -0.6263194 -1.3194178 0.3342525 0.14171781    TRUE
+# 4          NA      NA 2428422 3453187 166.062 26.40301  63    14 1.00000000 -0.4907448  0.38034738 -0.6583990 -1.2862561 0.3339605 0.11027823    TRUE
+# 5          NA      NA 2428422 3453187 166.062 26.40301  64    14 1.00000000 -0.4540460  0.45241159 -0.6901416 -1.2533957 0.3336220 0.07906726    TRUE
+# 6          NA      NA 2428422 3453187 166.062 26.40301  65    14 1.00000000 -0.4172659  0.52365086 -0.7214138 -1.2209556 0.3332187 0.04817528    TRUE
+# date                  geometry
+# 1 2020-02-29 POINT (-90.4885 28.86829)
+# 2 2020-03-01 POINT (-90.4885 28.86829)
+# 3 2020-03-02 POINT (-90.4885 28.86829)
+# 4 2020-03-03 POINT (-90.4885 28.86829)
+# 5 2020-03-04 POINT (-90.4885 28.86829)
+# 6 2020-03-05 POINT (-90.4885 28.86829)
+
+# sDat <- sDat %>%
+#   mutate(predPC1=predict(PCmod1,newdata=.),predPC2=predict(PCmod2,newdata=.),predPC3=predict(PCmod3,newdata=.)) %>%
+#   mutate(predPC4=predict(PCmod4,newdata=.),predPC5=predict(PCmod5,newdata=.),predPC6=predict(PCmod6,newdata=.)) %>%
+#   mutate(PC1=ifelse(gap,predPC1,PC1),PC2=ifelse(gap,predPC2,PC2),PC3=ifelse(gap,predPC3,PC3)) %>%
+#   mutate(PC4=ifelse(gap,predPC4,PC4),PC5=ifelse(gap,predPC5,PC5),PC6=ifelse(gap,predPC6,PC6)) %>%
+#   select(-predPC1:-predPC6) %>%
+#   mutate(date=as.Date(paste('2020',round(doy),sep='-'),format='%Y-%j')) %>%
+#   rename(imputed=gap)
+# # #Takes ~10 seconds
+
+
 
 #Fit model of DO to gap-filled PCs ----------------------------------
 
@@ -49,7 +187,6 @@ fitLagMods <- function(i,dat=sDat,interaction=FALSE){
     left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
   bWatTemp <- bottomWDat %>% unite(ID,c('YEID','doy'),sep='-') %>% 
     left_join(sDatTemp,by='ID') %>% filter(!is.na(PC1))
-  
   
   if(!interaction){
     #Fit simple linear models use PC1:6
