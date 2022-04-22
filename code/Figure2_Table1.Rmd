@@ -39,7 +39,33 @@ source('helperFunctions.R') ## mae() function
 ## 1. load llModErr and fdaErr --------------------------------------------------------------------
 load(file = './data/errDat.Rdata')
 
+## --> before 2022/4/20, this data include `llModErr` and `fdaErr` seperately. Here, we need to extract these two from the 
+##     updated data called `errLag`
+names(errLag)
+  ## "lag"      "errType"  "mean_wse" "med_oose" "max_oose" "min_oose" "modType" 
+errLag <- errLag %>%
+  dplyr::rename_with(., ~ (gsub("_oose", "", .x, fixed = TRUE))) %>%
+  dplyr::rename(withinSampErr = mean_wse) %>%
+  dplyr::select(lag, errType, med, max, min, everything())
 
+
+
+llModErr <- errLag %>%
+  dplyr::filter(modType == 'Lagged Linear') %>%
+  dplyr::select(-modType)
+
+
+fdaErr  <- errLag %>%
+  dplyr::filter(modType == 'Functional Data Analysis')%>%
+  dplyr::select(-modType)
+```
+
+
+
+
+
+
+```{r}
 ## 2. load RF model error data --------------------------------------------------------------------
 fname <- paste0('./data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
 load(fname)
@@ -69,8 +95,10 @@ rfErr <- acc0 %>%
                    max = max(value, na.rm = T), 
                    min = min(value, na.rm = T), 
                    avg = mean(value, na.rm = T),
-                   iqr=IQR(value, na.rm = T)) %>%
-  dplyr::mutate(withinSampErr = NA)
+                   iqr = IQR(value, na.rm = T)) %>%
+  dplyr::select(-avg, -iqr) %>% ## updated on 4/21/2022 using new data
+  dplyr::mutate(withinSampErr = NA) %>%
+  as.data.frame()
   
 
 ## --> add within-sample-error (i.e., training accuracy) of RF model
@@ -84,7 +112,8 @@ rfErr_training <- err_rf_train %>%
                    max = max(value, na.rm = T), 
                    min = min(value, na.rm = T), 
                    avg = mean(value, na.rm = T),
-                   iqr=IQR(value, na.rm = T)) %>%
+                   iqr = IQR(value, na.rm = T)) %>%
+  dplyr::select(-avg, -iqr) %>%
   as.data.frame()
 
 ## --> final RF 
@@ -100,12 +129,14 @@ names(llModErr)
 names(rfErr)
 
 ## make sure `fdaErr` is the same format as `llModErr`
-fdaErr <- fdaErr %>% 
-  dplyr::rename(errType=name, 
-                max = upr, 
-                min = lwr) %>%
-  dplyr::mutate(iqr = NA) %>%
-  dplyr::select(names(llModErr))
+# fdaErr <- fdaErr %>% 
+#   dplyr::rename(errType=name, 
+#                 max = upr, 
+#                 min = lwr) %>%
+#   dplyr::mutate(iqr = NA) %>%
+#   dplyr::select(names(llModErr))
+
+
 
 # names(fdaErr)
 # fdaErr_na10 <- fdaErr %>%
@@ -199,7 +230,7 @@ err_3models_bestday <- err_3models %>%
 )
 library(lemon)
 reposition_legend(p, 'left')
-ggsave('./figures/outOfSamp_comparison_3models_new2.png', p, width=7, height=5)
+ggsave('./figures/outOfSamp_comparison_3models_new2022-04.png', p, width=7, height=5)
 ```
 
 
