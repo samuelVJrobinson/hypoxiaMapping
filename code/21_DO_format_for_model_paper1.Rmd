@@ -36,6 +36,13 @@ library(scico) ## colors
 
 
 ```{r Dirs}
+## revision
+rr <- 'R1' ## 1st revision for RSE
+
+today <- format(Sys.time(), "%Y%m%d"); print(today)
+
+
+
 ### Set work dir ----------------------------------------------------------
 path <- rstudioapi::getSourceEditorContext()$path
 dir  <- dirname(rstudioapi::getSourceEditorContext()$path); dir
@@ -48,20 +55,15 @@ dir.root   <- dirname(dir); dir.root
 dir.fig    <- paste0(dirname(dir), '/figures/'); dir.fig
 
 
-today <- format(Sys.time(), "%Y%m%d"); print(today)
-
 ### keep more decimals 
 options(digits = 15)
 options(pillar.sigfig = 15)
+
 ```
 
 
 
 ```{r Shapefile, include=FALSE}
-library(sf)
-library(maps)
-library(mapdata)
-
 bg_transparent <- 
   theme(
     panel.background = element_rect(fill = "transparent"),             # bg of the panel
@@ -194,27 +196,28 @@ ggplot() + geom_sf() +
 
 
 
-### write to file ---------------------------
+### write to file under the original dir ---------------------------
 getwd()
 
 fname <- paste0(dirname(dir), '/data/data_for_gee/_for_sam/sample_2014_DO_plusBathymetry3.xlsx'); fname
 writexl::write_xlsx(x = df2014, path = fname)
 
-fname <- paste0(dirname(dir), '/data/sample_2014_DO_plusBathymetry3.xlsx'); fname
-writexl::write_xlsx(x = df2014, path = fname)
-
-fname <- paste0(dirname(dir), './data/sample_waterData3.csv'); fname
-readr::write_csv(x = df2014, path = fname)
-
-
-
-## -------------------------------------------------------
 fname <- paste0(dirname(dir), '/data/data_for_gee/_for_sam/sample_2014_locations3.csv'); fname
 # writexl::write_xlsx(x = df2014_pt, path = fname)
 write.csv(x = df2014_pt, file = fname, row.names = F)
 
 fname <- paste0(dirname(dir), '/data/data_for_gee/_for_sam/sample_2014_locations3.shp'); fname
 st_write(obj = df2014_sf, dsn = fname, delete_layer = TRUE) # overwrites
+
+
+
+## write to file under the new dir -----------------------------------
+fname <- paste0(dirname(dir), '/data/sample_2014_DO_plusBathymetry3.xlsx'); fname
+writexl::write_xlsx(x = df2014, path = fname)
+
+fname <- paste0(dirname(dir), './data/sample_waterData3.csv'); fname
+readr::write_csv(x = df2014, path = fname)
+
 ```
 
 
@@ -224,11 +227,6 @@ st_write(obj = df2014_sf, dsn = fname, delete_layer = TRUE) # overwrites
   Figure S2. Sampling date at each sampling location (a) and the distribution of the sampling dates. 
 
 ```{r - Fig S2}
-
-## revision
-rr <- 'R1' ## 1st revision for RSE
-
-
 
 require("ggrepel") ## for `geom_text_repel`
 
@@ -468,7 +466,7 @@ do_depth_max <- readxl::read_excel(path = f)
 
 
   Figure S1. Bottom DO levels at each sampling location (dots) and the mean DO levels in each grid (polygon). 
-```{r - spatial grid - Fig S1}
+```{r - Fig S1 - spatial grid}
 ### perhaps to look at several sub-regions, using fishnet?
 globe_bb <- matrix(c(-96, 30,  ## left upper
                      -88,  30,   ## right upper
