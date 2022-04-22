@@ -43,19 +43,19 @@ load(file = './data/errDat.Rdata')
 ##     updated data called `errLag`
 names(errLag)
   ## "lag"      "errType"  "mean_wse" "med_oose" "max_oose" "min_oose" "modType" 
-errLag <- errLag %>%
+errDat <- errLag %>%
   dplyr::rename_with(., ~ (gsub("_oose", "", .x, fixed = TRUE))) %>%
   dplyr::rename(withinSampErr = mean_wse) %>%
   dplyr::select(lag, errType, med, max, min, everything())
 
 
 
-llModErr <- errLag %>%
+llModErr <- errDat %>%
   dplyr::filter(modType == 'Lagged Linear') %>%
   dplyr::select(-modType)
 
 
-fdaErr  <- errLag %>%
+fdaErr  <- errDat %>%
   dplyr::filter(modType == 'Functional Data Analysis')%>%
   dplyr::select(-modType)
 ```
@@ -98,6 +98,7 @@ rfErr <- acc0 %>%
                    iqr = IQR(value, na.rm = T)) %>%
   dplyr::select(-avg, -iqr) %>% ## updated on 4/21/2022 using new data
   dplyr::mutate(withinSampErr = NA) %>%
+  dplyr::filter(lag <= 80) %>%
   as.data.frame()
   
 
@@ -114,6 +115,7 @@ rfErr_training <- err_rf_train %>%
                    avg = mean(value, na.rm = T),
                    iqr = IQR(value, na.rm = T)) %>%
   dplyr::select(-avg, -iqr) %>%
+  dplyr::filter(lag <=80) %>%
   as.data.frame()
 
 ## --> final RF 
@@ -228,14 +230,14 @@ err_3models_bestday <- err_3models %>%
     theme_bw() +
     theme(legend.position = c(0.06, 0.75))
 )
-library(lemon)
-reposition_legend(p, 'left')
-ggsave('./figures/outOfSamp_comparison_3models_new2022-04.png', p, width=7, height=5)
+# library(lemon)
+# reposition_legend(p, 'left')
+# ggsave('./figures/accuracy_comparison_3models80d.png', p, width=7, height=5)
 ```
 
 
 
-```{r}
+```{r - plot with legend}
 ## 1. the input data for plot
 err_3models_long <- err_3models %>%
   gather(key = set, value = value, c(med, withinSampErr)) %>%
@@ -244,49 +246,55 @@ err_3models_long <- err_3models %>%
 
 err_3models_long$set = factor(x = err_3models_long$set, levels = c('med', 'withinSampErr'), labels = c('Testing', 'Training'))
 
+levels(err_3models_long$mod)
+
 ### 3. plot
 (p <- ggplot(data = err_3models_long, aes(x=lag, y=value))+
     
-    geom_line(aes(color = set, linetype=set))+
+    geom_line(aes(color = set, linetype = set))+
     scale_colour_manual(values = c('black', 'red')) +
+    scale_linetype_manual(values = c('solid', 'dashed')) +
     # scale_
     geom_ribbon(aes(ymax=max,ymin=min), alpha=0.3, show.legend = F)+
     ## --> To highlight the best data range for prediction  
     geom_rect(
-      data = data.frame(mod = factor(c('LLR', 'RFR'))), ## not to add 'rect' for FDA
+      data = data.frame(mod = factor(c('Lagged Linear Regression', 'Random Forest Regression'))), ## not to add 'rect' for FDA
       aes(x = NULL, y = NULL, xmin=-4,xmax=0, ymin=-Inf, ymax=Inf), 
       fill = 'blue', alpha=0.1, show.legend = F) + 
     facet_grid(errType~mod, scales = 'free_y')+
     labs(x='Time lag', y='Model Accuracy') +
     theme_bw() +
-    theme(legend.position = c(0.93, 0.75),
+    theme(legend.position = c(0.92, 0.75),
           legend.title = element_blank(),
           legend.background = element_rect(fill='transparent'),
           legend.box.background = element_rect(fill='transparent', color = 'transparent'))
 )
 
-ggsave('./figures/outOfSamp_comparison_3models_new2.png', p, width=7, height=5)
+ggsave('./figures/accuracy_comparison_3models80d_legend.png', p, width=7, height=5)
 ```
 
 
 
+
+
+
+
+
+
+
+
+
+***************************** THE END ***************************** 
+
 **The following code was used for FDA results without testing accuracy when feeding in different time ranges data**
-
-**might be useful for future, but not now**
-
-## 2 models + 1 model
-
-### plot 1 - LLR + RFR
-  
-  **median value**
 
   Tried `mean` value too, and it looks `mean` value is easier to identify the *best day*. 
   
-  --> also thinking about to highlight days with higher accuracy then the average of (medians), but still, no clear pattern found. 
+  --> also thinking about to highlight days with higher accuracy then the average of (medians)
   
-  --> So, just present the trends of `median`...
+  --> but still, no clear pattern found. So, just present the trends of `median`...
   
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 ## 1. the input data for plot
 err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
@@ -350,94 +358,6 @@ err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
 ```
 
 
-
-
-
-
-
-
-**plot 1 - moving average of median**
-  
-  The result is not good - give up this option. 
-  
-```{r eval=FALSE, include=FALSE}
-err_2models_ma <- err_2models %>%
-  dplyr::group_by(mod, errType) %>%
-  dplyr::mutate(
-    med_ma = zoo::rollmean(med, k = 3, fill = 'extend')) %>% ## fill = NA
-  arrange(mod, errType, lag)
-
-err_2models_ma_bestday <- err_2models_ma %>% 
-  dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
-  group_by(mod, errType) %>%
-  dplyr::mutate(best    = ifelse(errType != 'R2', min(med_ma), max(med_ma, na.rm = T)),
-                bestday = ifelse(med_ma == best, lag, NA)) %>%
-  dplyr::filter(!is.na(bestday))
-
-  
-  
-# (p1 <- ggplot(err_2models_ma, aes(x=lag, y=med))+
-#     geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
-#     geom_line(size = 2)+                  # aes(col = med), 
-#     geom_line(aes(y = med_ma),col = 'red')+ # , col = med_ma
-#     scale_color_viridis() + 
-#     # geom_ma(ma_fun = SMA, n = 3) + # Plot 30-day SMA
-#     # geom_line(aes(y=withinSampErr),col='red')+
-#     geom_vline(data = err_2models_ma_bestday, 
-#                aes(xintercept = bestday), linetype = "dashed", color="blue") + 
-#     facet_grid(errType~mod, scales = 'free_y')+
-#     labs(x='Time lag',y='Model Accuracy') +
-#     theme_bw()
-# )
-
-### --> not that good ......
-```
-
-
-
-### plot 2 - FDA
-
-```{r}
-### to keep the y-axis at the same scale in all three plots, here we add the max and min value from p1 to p2. 
-fdaErr_si <- fdaErr %>%
-  group_by(name) %>%
-  dplyr::distinct(med)
-
-err_2models_MaxMin <- err_2models %>%
-  group_by(errType) %>%
-  dplyr::summarise(max = max(max, na.rm = T),
-                   min = min(min, na.rm = T)) %>%
-  gather(key = maxmin, value = value, max:min) %>%
-  dplyr::select(-maxmin) %>%
-  merge(., fdaErr_si, by.x = 'errType', by.y = 'name', all.x = T) %>%
-  dplyr::rename('name' = 'errType') %>% as.data.frame()
-
-fdaErr2 <- rbind(fdaErr %>% as.data.frame(), err_2models_MaxMin)
-
-
-(p2 <- fdaErr2 %>% 
-  dplyr::mutate(mod = 'FDA') %>% 
-  ggplot(aes(x=value))+#geom_freqpoly()+
-  geom_histogram(fill='black', alpha=0.3, binwidth = 0.02)+
-  geom_vline(aes(xintercept=med),col='black')+
-  geom_vline(data=fdaWithin,aes(xintercept=value),col='red')+
-    facet_grid(name~mod,scales='free_y')+
-  
-  coord_flip() +
-    labs(x='',y='Count') +
-    theme_bw()
-)
-```
-
-
-
-### combine plot 1 and 2
-```{r}
-(p <- ggarrange(p1,p2,nrow=1, widths = c(2,1)))
-
-ggsave('./figures/outOfSamp_comparison_3models.png', p, width=8, height=4)
-
-```
 
 
 
