@@ -62,8 +62,11 @@ options(scipen = 999) # Modify global options in R
 
 
 # Data
-## Clean data
 
+## Clean data
+  
+  *WARNING: We won't run code in this section, as we will use data from `dead_zone_telecoupling` project. Skip and go to next section!*
+  
   loop read in csv of aqua and terr data
   
 ```{r loop read in csv, eval=FALSE, include=FALSE}
@@ -336,7 +339,7 @@ df_do_unique <- df_sample_info %>%
 
 
 
-```{r ------ shp for testing, eval=FALSE, include=FALSE}
+```{r - ---- shp for testing, eval=FALSE, include=FALSE}
 
 ### join DO table and spectrum table ---------------
 f <- df_do_new %>%
@@ -729,8 +732,9 @@ for (nw in seq(1, slots)) {
     arrange(!is.na(year), !is.na(Year))
   
   ### write to .xlsx ---------------------------------
-  fname <- paste0(dir.cleaned, 'by_timelag_withDO/sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_',
-                  nw, prefix, '.xlsx'); print(fname)
+  pre_name <- paste0('sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_')
+  
+  fname <- paste0(dir.cleaned, 'by_timelag_withDO/', pre_name, nw, prefix, '.xlsx'); print(fname)
   writexl::write_xlsx(x = f, path = fname)
   
   
@@ -738,13 +742,18 @@ for (nw in seq(1, slots)) {
   projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
   
   ### to train RF in GEE, there should be no NA values in each band
-  f_noNA <- merge(x = f_rs %>% drop_na(), 
-                  y = df_do_toBeLinked, by = 'YEID') 
-  f_shp <- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+  f      <- merge(x = f_rs, y = df_do_toBeLinked, by = 'YEID') 
+  f_noNA <- merge(x = f_rs %>% drop_na(), y = df_do_toBeLinked, by = 'YEID') 
   
-  ### write to .shp
-  shp_name <- paste0('sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_', 
-                     nw, prefix, '_noNA', '.shp');  print(shp_name)
+  
+  f_shp    <- st_as_sf(x = f,      coords = c("lon", "lat"), remove = F, crs = projcrs)
+  shp_name <- paste0(pre_name, nw, prefix, '_withNA', '.shp');  
+  shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+  st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+  
+  
+  f_noNAshp<- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+  shp_name <- paste0(pre_name, nw, prefix, '_noNA', '.shp');  
   shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
   st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
 }
@@ -757,6 +766,7 @@ for (nw in seq(1, slots)) {
 ```{r Training samples for RF in GEE}
 
 ### see code in the above chuck
+###   upload the shape files to GEE 
 ```
 
 
