@@ -300,21 +300,28 @@ WSE <- bind_cols(lag=lags,
 
 #Out of sample error
 OOSE <- cvPredList %>% 
-  group_by(lag,errType) %>% 
-  summarize(med_oose=median(value),max_oose=max(value),min_oose=min(value)) %>% 
+  # group_by(lag,errType) %>% 
+  # summarize(mean=mean(value),med=median(value),max=max(value),min=min(value),iqr=IQR(value)) %>% 
+  # summarize(med_oose=median(value),max_oose=max(value),min_oose=min(value)) %>% 
   mutate(lag=lag-1) %>% ungroup()
 
+#Arrange for Yingjie
+WSE <- WSE %>% transmute(lag,errType,error=mean_wse,errType2='Within Sample')
+OOSE <- OOSE %>% transmute(lag,errType,error=value,errType2='Out of Sample')
+
 #Join together
-llErrLag <- bind_cols(WSE,select(OOSE,-errType,-lag))
+llErrLag <- bind_rows(WSE,OOSE)
 save(llErrLag,file='./data/llErrLag.Rdata')
 
-ggplot(llErrLag,aes(x=lag))+
-  geom_ribbon(aes(ymax=max_oose,ymin=min_oose),alpha=0.3)+
-  geom_line(aes(y=med_oose))+
-  geom_line(data=WSE,aes(y=mean_wse),col='red')+
+llErrLag %>% group_by(lag,errType,errType2) %>% 
+  summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
+  ggplot(aes(x=lag))+
+  geom_ribbon(aes(ymax=maxErr,ymin=minErr,fill=errType2),alpha=0.3)+
+  geom_line(aes(y=medErr,col=errType2))+
   facet_wrap(~errType,ncol=1,scales='free_y')+
-  labs(x='Time lag',y='Error')
-
+  labs(x='Time Lag',y='Error',col='Error Type',fill='Error Type')+
+  scale_colour_manual(values=c('grey10','red'))+
+  scale_fill_manual(values=c('grey10','red'))
 
 # Fit FR model of DO to gap-filled PCs ------------------------------------
 
@@ -480,39 +487,40 @@ getLagErr <- function(l,f,test=0,N=30){
   }
 }
 
-WSE <- lapply(lags,getLagErr,f=fdat) %>% #Training data (within-sample) error
+WSE <- lapply(lags,getLagErr,f=fdat) %>% #Training data (within-sample) error - takes a few seconds
   bind_rows() %>% mutate(lag=lags) %>%
-  pivot_longer(RMSE:R2) 
+  pivot_longer(RMSE:R2,names_to='errType',values_to='error') %>% 
+  mutate(errType2='Within Sample')
 
 # cluster <- makeCluster(10)
-# clusterExport(cluster,c('fitFRmodCV','fdat'))
-# cvPredList3 <- parLapply(cl=cluster,1:1000,fitFRmodCV)  #Takes only a few seconds to run
+# clusterExport(cluster,c('getLagErr','rmse','mae'))
+# a <- Sys.time()
+# OOSE <- parLapply(cl=cluster,X = lags, fun = getLagErr,f=fdat,test=0.3,N=1000) #Testing data (out of sample) error - takes 17 mins
 # stopCluster(cluster)
-
-cluster <- makeCluster(10)
-clusterExport(cluster,c('getLagErr','rmse','mae'))
-OOSE <- parLapply(cl=cluster,X = lags, fun = getLagErr,f=fdat,test=0.3,N=500) #Testing data (out of sample) error - takes a few minutes
+# b <- Sys.time()
+# difftime(b,a)
+# save(OOSE,file='./data/cvPredLists2.Rdata')
+load('./data/cvPredLists2.Rdata')
 
 OOSE <- OOSE %>% lapply(.,data.frame) %>% set_names(nm=as.character(lags)) %>%
   bind_rows(.id = 'lag') %>%
   mutate(lag=as.numeric(lag)) %>%
-  pivot_longer(RMSE:R2) %>%
-  group_by(lag,name) %>% summarize(med_oose=median(value),max_oose=quantile(value,0.9),min_oose=quantile(value,0.1)) %>% 
-  ungroup()
+  pivot_longer(RMSE:R2,names_to='errType',values_to = 'error') %>% 
+  mutate(errType2='Out of Sample') 
 
-stopCluster(cluster)
-
-fdaErrLag <- left_join(OOSE,WSE,by=c('lag','errType')) %>% 
-  rename('mean_wse'='value')
-
-fdaErrLag %>% ggplot(aes(x=lag,y=med_oose))+
-  geom_ribbon(aes(ymax=max_oose,ymin=min_oose),alpha=0.3)+
-  geom_line()+ 
-  geom_line(aes(y=mean_wse),col='red')+
-  facet_wrap(~name,ncol=1,scales='free_y')+
-  labs(x='Maximum lag days',y='Error')  
-
+#Join together
+fdaErrLag <- bind_rows(WSE,OOSE)
 save(fdaErrLag,file='./data/fdaErrLag.Rdata')
+
+fdaErrLag %>% group_by(lag,errType,errType2) %>% 
+  summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
+  ggplot(aes(x=lag))+
+  geom_ribbon(aes(ymax=maxErr,ymin=minErr,fill=errType2),alpha=0.3)+
+  geom_line(aes(y=medErr,col=errType2))+
+  facet_wrap(~errType,ncol=1,scales='free_y')+
+  labs(x='Time Lag',y='Error',col='Error Type',fill='Error Type')+
+  scale_colour_manual(values=c('grey10','red'))+
+  scale_fill_manual(values=c('grey10','red'))
 
 #Conclusion: Data from 30 days previous is better, but not a huge amount better than, data from a 10-day span
 
@@ -543,19 +551,27 @@ sapply(modList2,getDF)[which.min(sapply(modList2,rmse))]
 bWatMod$df.residual
 
 #Compare within-sample to out-of-sample error, using only simple lagged-linear model
-# load('./data/llErrLag.Rdata')
-# load('./data/fdaErrLag.Rdata')
-# errLag <- bind_rows(
-#   mutate(modType='Lagged Linear',llErrLag),
-#   mutate(modType='Functional Data Analysis',fdaErrLag)
-# )
-# NOTE <- 'Data are quite different from each other, so had to save as separate objects. llModErr = Out-of-sample and within-sample error for lagged linear models. fdaErr = Out-of-sample and within-sample error for 500 random draws of FDA model.'
-# save(errLag,NOTE,file = './data/errDat.Rdata')
+load('./data/llErrLag.Rdata')
+load('./data/fdaErrLag.Rdata')
+errLag <- bind_rows(
+  mutate(modType='Lagged Linear',llErrLag),
+  mutate(modType='Functional Data Analysis',fdaErrLag)
+)
+NOTE <- 'Data are quite different from each other, so had to save as separate objects. llModErr = Out-of-sample and within-sample error for lagged linear models. fdaErr = Out-of-sample and within-sample error for 500 random draws of FDA model.'
+save(errLag,NOTE,file = './data/errDat.Rdata')
+
 load('./data/errDat.Rdata')
-(p <- ggplot(errLag,aes(x=lag))+
-  geom_ribbon(aes(ymax=max_oose,ymin=min_oose),alpha=0.3)+
-  geom_line(aes(y=med_oose))+
-  geom_line(aes(y=mean_wse),col='red')+facet_grid(errType~modType,scales='free_y')+
-  labs(x='Time lag',y='Model Accuracy'))
+(p <- errLag %>% 
+    group_by(lag,errType,errType2,modType) %>% 
+    summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
+    ggplot(aes(x=lag))+
+    geom_ribbon(aes(ymax=maxErr,ymin=minErr,fill=errType2),alpha=0.3)+
+    geom_line(aes(y=medErr,col=errType2))+
+    facet_grid(errType~modType,scales='free_y')+
+    labs(x='Time lag',y='Model Accuracy')+
+    labs(x='Time Lag',y='Error',col='Error Type',fill='Error Type')+
+    scale_colour_manual(values=c('grey10','red'))+
+    scale_fill_manual(values=c('grey10','red'))
+  )
 ggsave('./figures/outOfSamp_comparison.png',p,width=8,height=8)
 
