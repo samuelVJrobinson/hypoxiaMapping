@@ -563,7 +563,7 @@ save(errLag,NOTE,file = './data/errDat.Rdata')
 load('./data/errDat.Rdata')
 (p <- errLag %>% 
     group_by(lag,errType,errType2,modType) %>% 
-    summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
+    dplyr::summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
     ggplot(aes(x=lag))+
     geom_ribbon(aes(ymax=maxErr,ymin=minErr,fill=errType2),alpha=0.3)+
     geom_line(aes(y=medErr,col=errType2))+
