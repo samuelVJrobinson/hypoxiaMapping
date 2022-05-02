@@ -263,30 +263,6 @@ bottomWDat <- bottomWDat %>% mutate( #Match closest unique location in spectral 
 
 # Fit PC models -----------------------------------
 
-# #Approach using thin-plate splines
-
-# library(parallel)
-# cl <- makeCluster(15)
-# #Takes about 10 minutes using 15 cores
-# bFuns <- c('tp','tp'); kNum <- c(60,20); dNum <- c(2,1)
-# a <- Sys.time()
-# PCmod1 <- bam(PC1~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl) 
-# PCmod2 <- bam(PC2~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod3 <- bam(PC3~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod4 <- bam(PC4~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod5 <- bam(PC5~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# PCmod6 <- bam(PC6~te(sN,sE,doy,bs=bFuns,k=kNum,d=dNum),data=sDat2,cluster=cl)
-# par(mfrow=c(2,2)); gam.check(PCmod1); abline(0,1,col='red'); par(mfrow=c(1,1)) #Not too bad
-# par(mfrow=c(2,2)); gam.check(PCmod2); abline(0,1,col='red'); par(mfrow=c(1,1)) 
-# par(mfrow=c(2,2)); gam.check(PCmod3); abline(0,1,col='red'); par(mfrow=c(1,1)) 
-# par(mfrow=c(2,2)); gam.check(PCmod4); abline(0,1,col='red'); par(mfrow=c(1,1))
-# par(mfrow=c(2,2)); gam.check(PCmod5); abline(0,1,col='red'); par(mfrow=c(1,1))
-# par(mfrow=c(2,2)); gam.check(PCmod6); abline(0,1,col='red'); par(mfrow=c(1,1))
-# Sys.time()-a
-# stopCluster(cl)
-# save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmods_mapping.RData')
-# load('./data/PCmods_mapping.RData') #Load original tensor product smoothers
-
 #Approach using soap-film smoothers
 #Testing:
 # #Buffer data area - knots can't be too close to boundary
@@ -527,102 +503,102 @@ modForm <- "999~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NU
 #First te("sf") is for boundary, second te("sw") is for actual soap film
 
 storageDir <- "/media/rsamuel/Storage/geoData/Rasters/hypoxiaMapping2021/models/"
-for(chunk in 1:(length(doyBreaks)-1)){ #For each chunk of data
-  for(pc in 1:5){ #For each PC
-    tempDat <- sDatList[[chunk]]
-    library(parallel)
-    cl <- makeCluster(15)
-    PCmod1 <- bam(formula(gsub('999',paste0('PC',pc),modForm)), knots=kts, data=tempDat, cluster=cl)  
-    stopCluster(cl)
-    
-    #Save coefficients
-    modList <- list(coefs=coef(PCmod1), #Coefficients
-                    vcv=vcov(PCmod1), #Covariance matrix
-                    smooths=PCmod1$smooth) #Smooth specifications
-    save(modList,file = paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata")) 
-    
-    #Diagnostics
-    #https://stackoverflow.com/questions/45918662/plot-gam-from-mgcv-with-all-terms-true-within-a-function
-    png(paste0(storageDir,'summary',chunk,"_pc",pc,".png"),width=12,height=6,units='in',res=200)
-    # plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=TRUE)
-    plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=FALSE)
-    dev.off()
-    
-    #Residual plots
-    actual <- tempDat[,paste0('PC',pc)]
-    res <- residuals(PCmod1,type = 'pearson')
-    devRes <- residuals(PCmod1,type='deviance')
-    pred <- predict(PCmod1)
-    fit <- fitted(PCmod1)
-    if(length(devRes)>10000){
-      samp <- sample(1:length(devRes),10000) #Sub-samples to 10000
-      devRes <- devRes[samp]; pred <- pred[samp]; fit <- fit[samp]; res <- res[samp]; actual <- actual[samp]
-    } 
-    
-    #Residuals
-    png(paste0(storageDir,'residuals',chunk,"_pc",pc,".png"),width=8,height=8,units='in',res=200)
-    par(mfrow=c(2,2))
-    qqnorm(devRes,main='Deviance residuals Q-Q'); qqline(devRes)
-    plot(fit,res,xlab='Fitted',ylab='Resid',main='Fitted vs Residual'); abline(h=0,col='red')
-    hist(devRes,main='Deviance residuals')
-    plot(actual,pred,xlab='Actual',ylab='Predicted',main='Actual vs Predicted'); abline(0,1,col='red')
-    dev.off()
-    par(mfrow=c(1,1))
-    
-    capture.output({ #Model summary
-      print("SUMMARY---------------------------------")
-      summary(PCmod1) 
-    },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"))
-    # capture.output({ #GAM check results
-    #   print(" ")
-    #   print("GAM.CHECK-------------------------------")
-    #   k.check(PCmod1)# Runs into problems here. I don't think this work for soap film smoothers
-    # },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"),append=TRUE) 
-  }
-}
-
-predDat <- expand_grid(doy=c(66,77,88,99),kts)
-
-predDat <- matrix(
-  c(98,-408.8168,-365.7818,
-  98,-439.7257,-364.7678,
-  98,-451.3474,-364.5414,
-  98,-466.6571,-326.5940),
-  ncol=3,byrow = TRUE,dimnames = list(NULL,c('doy','sE','sN'))
-) %>% data.frame
-
-predict(PCmod1,newdata=predDat) #Doesn't work
-predModList(modList,newdat = predDat) #Also doesn't work
-
-tempDat %>% ggplot(aes(x=sE,y=sN))+geom_point()+
-  geom_point(data=predDat,col='red')
+# for(chunk in 1:(length(doyBreaks)-1)){ #For each chunk of data
+#   for(pc in 1:5){ #For each PC
+#     tempDat <- sDatList[[chunk]]
+#     library(parallel)
+#     cl <- makeCluster(15)
+#     PCmod1 <- bam(formula(gsub('999',paste0('PC',pc),modForm)), knots=kts, data=tempDat, cluster=cl)  
+#     stopCluster(cl)
+#     
+#     #Save coefficients
+#     modList <- list(coefs=coef(PCmod1), #Coefficients
+#                     vcv=vcov(PCmod1), #Covariance matrix
+#                     smooths=PCmod1$smooth) #Smooth specifications
+#     save(modList,file = paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata")) 
+#     
+#     #Diagnostics
+#     #https://stackoverflow.com/questions/45918662/plot-gam-from-mgcv-with-all-terms-true-within-a-function
+#     png(paste0(storageDir,'summary',chunk,"_pc",pc,".png"),width=12,height=6,units='in',res=200)
+#     # plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=TRUE)
+#     plot(PCmod1,scheme=2,too.far=0.01,pages=1,all.terms=FALSE)
+#     dev.off()
+#     
+#     #Residual plots
+#     actual <- tempDat[,paste0('PC',pc)]
+#     res <- residuals(PCmod1,type = 'pearson')
+#     devRes <- residuals(PCmod1,type='deviance')
+#     pred <- predict(PCmod1)
+#     fit <- fitted(PCmod1)
+#     if(length(devRes)>10000){
+#       samp <- sample(1:length(devRes),10000) #Sub-samples to 10000
+#       devRes <- devRes[samp]; pred <- pred[samp]; fit <- fit[samp]; res <- res[samp]; actual <- actual[samp]
+#     } 
+#     
+#     #Residuals
+#     png(paste0(storageDir,'residuals',chunk,"_pc",pc,".png"),width=8,height=8,units='in',res=200)
+#     par(mfrow=c(2,2))
+#     qqnorm(devRes,main='Deviance residuals Q-Q'); qqline(devRes)
+#     plot(fit,res,xlab='Fitted',ylab='Resid',main='Fitted vs Residual'); abline(h=0,col='red')
+#     hist(devRes,main='Deviance residuals')
+#     plot(actual,pred,xlab='Actual',ylab='Predicted',main='Actual vs Predicted'); abline(0,1,col='red')
+#     dev.off()
+#     par(mfrow=c(1,1))
+#     
+#     capture.output({ #Model summary
+#       print("SUMMARY---------------------------------")
+#       summary(PCmod1) 
+#     },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"))
+#     # capture.output({ #GAM check results
+#     #   print(" ")
+#     #   print("GAM.CHECK-------------------------------")
+#     #   k.check(PCmod1)# Runs into problems here. I don't think this work for soap film smoothers
+#     # },file=paste0(storageDir,'results',chunk,"_pc",pc,".txt"),append=TRUE) 
+#   }
+# }
 
 
-# ggplot(predDat,aes(x=sE,y=sN,col=y))+geom_point()+facet_wrap(~doy)+
-#   scale_colour_distiller(palette='RdBu',direction = -1)
+#OK, but not perfect. Looks like the spatial scale of the process is pretty small
+#Turbulence patterns would probably have to have some kind of dynamic model
 
-# #OK, but not perfect. Looks like the spatial scale of the process is pretty small
-# #Turbulence patterns would probably have to have some kind of dynamic model
-# sDatList[[1]] %>% mutate(pred=predict(PCmod1),resid=resid(PCmod1)) %>% 
-#   filter(doy==66|doy==81|doy==99) %>% 
-#   dplyr::select(PC1,pred,resid,doy) %>% 
-#   pivot_longer(c(PC1,pred,resid)) %>% 
-#   ggplot()+geom_sf(aes(col=value),size=0.1)+
-#   scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
-#   geom_sf(data=knotLocs)+geom_sf(data=dataBoundary,fill=NA)+
-#   facet_grid(name~doy)
-PCmod2 <- bam(formula(gsub('999','PC2',modForm)),knots=kts,data=sDat2,cluster=cl)
-PCmod3 <- bam(formula(gsub('999','PC3',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod4 <- bam(formula(gsub('999','PC4',modForm)),knots=kts,data=sDat2,cluster=cl)
-# PCmod5 <- bam(formula(gsub('999','PC5',modForm)),knots=kts,data=sDat2,cluster=cl)
-stopCluster(cl)
+load(paste0(storageDir,"modList",'1',"_pc",'1',".Rdata"))
 
-save(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6,file='./data/PCmodsSoap_mapping.RData')
+#PC1, predicted PC1, and residuals
+sDatList[[1]] %>% dplyr::select(-sE,-sN) %>% 
+  left_join(locs,by='loc') %>% 
+  mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[1]],doy,sE,sN))) %>%
+  mutate(resid=PC1-pred) %>% 
+  filter(doy==66|doy==81|doy==99) %>%
+  dplyr::select(PC1,pred,resid,doy,geometry) %>%
+  pivot_longer(c(pred,resid)) %>%
+  ggplot()+geom_sf(aes(geometry=geometry,col=value),size=0.1)+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+  geom_sf(data=knotLocs)+geom_sf(data=dataBoundary,fill=NA)+
+  facet_grid(name~doy)
 
-load('./data/PCmodsSoap_mapping.RData') #Load soap film smoothers
+#Residuals only
+sDatList[[1]] %>% dplyr::select(-sE,-sN) %>% 
+  left_join(locs,by='loc') %>% 
+  mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[1]],doy,sE,sN))) %>%
+  mutate(resid=PC1-pred) %>% 
+  filter(doy==66|doy==81|doy==99) %>%
+  ggplot()+geom_sf(aes(geometry=geometry,col=resid),size=0.1)+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+  geom_sf(data=dataBoundary,fill=NA)+
+  facet_wrap(~doy,ncol=1)
 
-
-# Match
+#Sum(abs(residuals)): really good idea for future maps
+sDatList[[1]] %>% dplyr::select(-sE,-sN) %>% 
+  mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[1]],doy,sE,sN))) %>% 
+  mutate(resid=PC1-pred) %>% 
+  group_by(loc) %>% summarize(meanRes=mean(resid),sumRes=sum(abs(resid))) %>% 
+  ungroup() %>% left_join(locs,by='loc') %>% 
+  ggplot()+geom_sf(aes(geometry=geometry,col=sumRes),size=0.1)+
+  # geom_sf(data=knotLocs,col='red')+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+  geom_sf(data=bottomWDat)+
+  geom_sf(data=dataBoundary,fill=NA)
+  
 
 # Get predictions from lagged linear model --------------------
 
@@ -697,25 +673,31 @@ dateLabs <- with(dateRanges,paste0(startDay,' - ',endDay)) #Labels for date rang
 dateRanges <- with(dateRanges,data.frame(slice=rep(slice,nDays),doy=min(startDay_doy):max(endDay_doy)))
 
 d <- dateRanges$doy #All days
-l <- sort(unique(locLookup$loc)) #All unique locations
-daylag <- 12 #Use 12-day lag
+l <- sort(unique(locs$loc)) #All unique locations
+daylag <- 16 #Use 16-day lag
 
 newDF <- expand_grid(doy=d,loc=l) %>% #Days/locations to predict at
-  mutate(doy2=doy,doy=doy-daylag) %>% #doy = lagged day to get DO predictions from, doy 2 = Actual day 
-  left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
-  left_join(st_drop_geometry(locLookup),by='loc')
+  mutate(doy2=doy,doy=doy-daylag) %>% #doy = lagged day to use for predictions, doy 2 = Actual day of DO measurement
+  left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN,-doySplit) %>% 
+  left_join(st_drop_geometry(locs),by='loc') %>% 
+  mutate(doySplit=cut(as.numeric(doy),breaks=doyBreaks,include.lowest=TRUE)) %>% 
+  mutate(doySplit=as.numeric(doySplit))
 
 #Separates into 2 df, one with values and one with NAs (quicker predictions)
-newDF1 <- newDF %>% filter(!is.na(PC1))%>% mutate(imputed=FALSE)  #DF with values
-newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
-cl <- makeCluster(15)
-{a <- Sys.time() #Takes about 4 mins
-newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){ #Make predictions in NA spaces
-  require(mgcv); predict.gam(x,newdata=N)
-  },N=newDF2) %>% 
-  set_names(paste0('PC',1:6)) %>% bind_cols() %>% bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN) %>% mutate(imputed=TRUE)
-Sys.time()-a}
-stopCluster(cl)
+newDF1 <- newDF %>% filter(!is.na(PC1)) %>% mutate(imputed=FALSE)  #DF with values
+newDF2 <- newDF %>% filter(is.na(PC1)) %>% mutate(imputed=TRUE) #DF with NAs
+
+for(pc in 1:5){ #Takes about 4 mins
+  for(chunk in unique(newDF2$doySplit)){
+    load(paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata"))
+    useThese <- newDF2$doySplit==chunk #indices to use
+    nd <- newDF2 %>% filter(useThese) %>% dplyr::select(doy,sE,sN)
+    newDF2[useThese,paste0('PC',pc)] <- predModList(modList,newdat = nd)
+    rm(modList); gc() #Memory usage fairly heavy
+  }
+}
+
+#Join back together
 newDF <- bind_rows(newDF1,newDF2) %>% 
   arrange(loc,doy) %>% mutate(predDO=predict(m1,.)) %>% 
   dplyr::select(-sE,-sN,-doy) %>% rename('doy'='doy2')
@@ -729,7 +711,7 @@ mapDat <- newDF %>%
   mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE),
                 .names='{.col}_factor')) %>% 
   mutate(slice=factor(slice,lab=dateLabs)) %>% 
-  left_join(locLookup,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
+  left_join(locs,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
 
 #Save a copy for YingJie
 LLmapDat <- mapDat %>% 
@@ -738,7 +720,7 @@ LLmapDat <- mapDat %>%
 save(LLmapDat,file = './data/LLmapDat.Rdata')
 
 #Full copy for YingJie
-LLmapDatFull <- newDF %>% left_join(.,locLookup,by='loc') %>% 
+LLmapDatFull <- newDF %>% left_join(.,locs,by='loc') %>% 
   dplyr::select(doy,imputed,predDO,geometry) %>% st_as_sf() %>% 
   geom2cols()
 save(LLmapDatFull,file = './data/LLmapDatFull.Rdata')
@@ -754,13 +736,32 @@ p2 <- ggplot(mapDat)+
   facet_wrap(~slice,ncol=3)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
   labs(title='Lagged-linear - mean(DO)',col='DO (mg/L)')
-p <- ggarrange(p1,p2,ncol=1)
+(p <- ggarrange(p1,p2,ncol=1))
 
 ggsave(p,filename = './figures/mapLLpred.png',width=12,height=15)
 
 # Get predictions from FR model ------------------------------
 
-load('./data/funRegMod.Rdata')
+# load('./data/funRegMod.Rdata',verbose=TRUE) #Original FDA model uses 80 day range, but if we want to use 30 day lags:
+load(file='./data/FRdat.Rdata')
+
+fdat <- lapply(fdat,function(x){
+  if(is.matrix(x)){
+    return(x[,1:31])
+  } else {
+    return(x)
+  }
+})
+
+basisType <- 'cr' #Cubic regression splines
+#Fit FDA model 
+bWatMod <- gam(DO_bottom ~ s(dayMat,by=pcaMat1,bs=basisType)+
+                 s(dayMat,by=pcaMat2,bs=basisType)+
+                 s(dayMat,by=pcaMat3,bs=basisType)+
+                 s(dayMat,by=pcaMat4,bs=basisType)+
+                 s(dayMat,by=pcaMat5,bs=basisType), 
+               data=fdat)
+summary(bWatMod)
 
 dateRanges <- read.csv('./data/mappingDateRanges.csv') %>% #Get dates to predict on
   mutate(across(c(startDay,endDay), ~as.numeric(format(as.Date(paste0(.x,' 2014'),format='%B %d %Y'),format='%j')),.names='{.col}_doy'))
@@ -768,24 +769,51 @@ dateLabs <- with(dateRanges,paste0(startDay,' - ',endDay)) #Labels for date rang
 dateRanges <- with(dateRanges,data.frame(slice=rep(slice,nDays),doy=min(startDay_doy):max(endDay_doy)))
 
 d <- dateRanges$doy #All days
-l <- sort(unique(locLookup$loc)) #All unique locations
+l <- sort(unique(locs$loc)) #All unique locations
 daylag <- 30 #30-day lag
 
 #Dataframe of values to choose from
 newDF <- expand_grid(doy=unique(do.call('c',lapply(d,function(x) x-(daylag:0)))),loc=l) %>% 
   left_join(st_drop_geometry(sDat2),by=c('doy','loc')) %>% dplyr::select(-sE,-sN) %>% 
-  left_join(st_drop_geometry(locLookup),by='loc')
+  left_join(st_drop_geometry(locs),by='loc') %>% 
+  mutate(doySplit=cut(as.numeric(doy),breaks=doyBreaks,include.lowest=TRUE)) %>% 
+  mutate(doySplit=as.numeric(doySplit))
+
 newDF1 <- newDF %>% filter(!is.na(PC1)) %>% mutate(imputed=FALSE)  #DF with values
-newDF2 <- newDF %>% filter(is.na(PC1)) %>% dplyr::select(-contains('PC')) #DF with NAs
-cl <- makeCluster(15)
-{a <- Sys.time() #Takes about 4.6 mins for all 2.4 mil points
-newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
-  set_names(paste0('PC',1:6)) %>% bind_cols() %>% 
-  bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN) %>% mutate(imputed=TRUE)
-Sys.time()-a}; beep()
-stopCluster(cl)
+newDF2 <- newDF %>% filter(is.na(PC1)) %>% mutate(imputed=TRUE) #DF with NAs
+
+# cl <- makeCluster(15)
+# {a <- Sys.time() #Takes about 4.6 mins for all 2.4 mil points
+# newDF2 <- parLapply(cl=cl,X=list(PCmod1,PCmod2,PCmod3,PCmod4,PCmod5,PCmod6),fun=function(x,N){require(mgcv); predict.gam(x,newdata=N)},N=newDF2) %>% 
+#   set_names(paste0('PC',1:6)) %>% bind_cols() %>% 
+#   bind_cols(newDF2,.) %>% relocate(doy,loc,PC1:PC6,sE,sN) %>% mutate(imputed=TRUE)
+# Sys.time()-a}; beep()
+# stopCluster(cl)
+# newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy)
+# rm(newDF1,newDF2) #Cleanup
+
+
+{ #Takes about 5.5 mins
+  pb <- txtProgressBar(style=3)
+  a <- Sys.time()
+  pbi <- 1; pbl <- 5*length(unique(newDF2$doySplit))
+  for(pc in 1:5){ 
+    for(chunk in unique(newDF2$doySplit)){
+      load(paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata"))
+      useThese <- newDF2$doySplit==chunk #indices to use
+      nd <- newDF2 %>% filter(useThese) %>% dplyr::select(doy,sE,sN)
+      newDF2[useThese,paste0('PC',pc)] <- predModList(modList,newdat = nd)
+      rm(modList); gc() #Memory usage fairly heavy
+      setTxtProgressBar(pb,pbi/pbl)
+      pbi <- pbi+1
+    }
+  }
+  b <- Sys.time()
+  difftime(b,a)
+}
+
+#Join together
 newDF <- bind_rows(newDF1,newDF2) %>% arrange(loc,doy)
-rm(newDF1,newDF2) #Cleanup
 
 #Make list of matrices
 datList <- with(expand.grid(l=l,d=d),list(loc=l,doy=d))
@@ -799,9 +827,9 @@ nd <- lapply(1:length(d),function(i){ #Takes about a minute
 
 pcaMats <- lapply(which(grepl('PC',names(nd))),function(j){
   return(matrix(nd[,j],ncol=ncol(datList$dayMat),byrow=TRUE)[,ncol(datList$dayMat):1])
-}) %>% set_names(paste0('pcaMat',1:6))
+}) %>% set_names(paste0('pcaMat',1:5))
 
-datList <- c(datList,pcaMats)
+datList <- c(datList,pcaMats); rm(pcaMats); gc()
 datList$isImputed <- matrix(nd[,which(grepl('imputed',names(nd)))],ncol=ncol(datList$dayMat),byrow=TRUE) #Which values are imputed?
 
 {a <- Sys.time() #Takes 4.6 mins to generate predictions for each day/location
@@ -812,19 +840,20 @@ datList$isImputed <- matrix(nd[,which(grepl('imputed',names(nd)))],ncol=ncol(dat
 mapDat$propImputed <- apply(datList$isImputed,1,mean)
 
 #Full copy for YingJie
-FRmapDatFull <- mapDat %>% left_join(.,locLookup,by='loc') %>% 
+FRmapDatFull <- mapDat %>% left_join(.,locs,by='loc') %>% 
   dplyr::select(doy,propImputed,predDO,geometry) %>% st_as_sf() %>% 
   geom2cols()
 save(FRmapDatFull,file = './data/FRmapDatFull.Rdata')
 
 mapDat <- mapDat %>% 
-  left_join(.,dateRanges,by='doy') %>% 
+  mutate(slice=as.numeric(cut(doy,breaks=with(dateRanges,c(startDay_doy[1],endDay_doy)),include.lowest=TRUE))) %>% 
+  left_join(.,dateRanges,by='slice') %>% 
   group_by(slice,loc) %>% summarize(minDO=min(predDO),meanDO=mean(predDO),propImputed=mean(propImputed)) %>% 
   ungroup() %>% 
   mutate(across(c(minDO,meanDO),~cut(.x,breaks=c(min(.x,na.rm=TRUE),1,2,3,4,5,max(.x,na.rm=TRUE)),labels=c('<1','1-2','2-3','3-4','4-5','>5'),include.lowest=TRUE),
                 .names='{.col}_factor')) %>% 
   mutate(slice=factor(slice,lab=dateLabs)) %>% 
-  left_join(locLookup,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
+  left_join(locs,.,by='loc') %>% dplyr::select(-loc,-sE,-sN)
 
 #Save data for Yingie
 FRmapDat <- mapDat %>% 
@@ -834,11 +863,11 @@ FRmapDat <- mapDat %>%
 save(FRmapDat,file = './data/FRmapDat.Rdata')
 
 #Make figure
-p1 <- ggplot(mapDat)+
+(p1 <- ggplot(mapDat)+
   geom_sf(aes(col=minDO_factor,geometry=geometry),size=0.2)+
   facet_wrap(~slice,ncol=3)+
   scale_colour_brewer(type='seq',palette = 'RdBu')+
-  labs(title='Functional Regression - min(DO)',col='DO (mg/L)')
+  labs(title='Functional Regression - min(DO)',col='DO (mg/L)'))
 p2 <- ggplot(mapDat)+
   geom_sf(aes(col=meanDO_factor,geometry=geometry),size=0.2)+
   facet_wrap(~slice,ncol=3)+

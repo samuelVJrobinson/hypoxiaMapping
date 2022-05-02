@@ -185,13 +185,14 @@ ggsave('./figures/lagPCAmod_gapfill.png',p,width=8,height=8)
 
 #Global minimum at 80 day lag, 54 for interaction model. This seems unlikely, but using this for now
 #Simple model
-(bestDay <- which.min(sapply(modList1, mae))) #Minimum mae occurs on day 80
-which.min(sapply(modList1,rmse)) #Minimum rmse occurs on day 80
-#Interaction model
-(bestDay <- which.min(sapply(modList2,mae))) #Minimum mae occurs on day 53
-which.min(sapply(modList2,rmse)) #Day 53
+(bestDay <- lags[which.min(sapply(modList1,mae)[1:31])]) #Minimum mae occurs on day 80; if using only first 30 days, minimum on day 16
+lags[which.min(sapply(modList1,rmse)[1:31])] #Minimum rmse occurs on day 80; 18 if using first 30 days
 
-m1 <- modList1[[bestDay]] #Save model from that day
+# #Interaction model
+# (bestDay <- which.min(sapply(modList2,mae))) #Minimum mae occurs on day 53
+# which.min(sapply(modList2,rmse)) #Day 53
+
+m1 <- modList1[[bestDay+1]] #Save model from that day
 save(m1,file = './data/lagLinMod.Rdata')
 
 # Cross-validation (use 70%, predict on 30%)

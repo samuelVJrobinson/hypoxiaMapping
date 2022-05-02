@@ -11,7 +11,7 @@
    inkscape:export-filename="/home/rsamuel/Documents/hypoxiaMapping/figures/hypoxiaFormation/hypoxiaFormation2.png"
    inkscape:export-xdpi="96"
    inkscape:export-ydpi="96"
-   inkscape:version="1.1.1 (eb90963e84, 2021-10-02)"
+   inkscape:version="1.1.2 (08b2f3d93c, 2022-04-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -28,9 +28,9 @@
      inkscape:document-units="mm"
      showgrid="false"
      units="mm"
-     inkscape:zoom="0.37593995"
-     inkscape:cx="977.54974"
-     inkscape:cy="945.62975"
+     inkscape:zoom="0.26582969"
+     inkscape:cx="964.90351"
+     inkscape:cy="1235.7536"
      inkscape:window-width="1848"
      inkscape:window-height="1016"
      inkscape:window-x="72"
@@ -49,7 +49,12 @@
      inkscape:bbox-nodes="false"
      inkscape:bbox-paths="true"
      inkscape:snap-global="false"
-     inkscape:snap-bbox-edge-midpoints="true" />
+     inkscape:snap-bbox-edge-midpoints="true">
+    <sodipodi:guide
+       position="191.17282,359.82589"
+       orientation="0,-1"
+       id="guide20156" />
+  </sodipodi:namedview>
   <defs
      id="defs2">
     <linearGradient
@@ -263,19 +268,19 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;line-height:1.25;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.417431"
-       x="377.41544"
-       y="73.657608"
+       x="413.35193"
+       y="84.290512"
        id="text18413-6"
        transform="scale(0.94316328,1.0602618)"><tspan
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.69730022px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
-         x="377.41544"
-         y="73.657608"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
+         x="413.35193"
+         y="84.290512"
          id="tspan87173">Spectral signal from </tspan><tspan
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.69730022px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
-         x="377.41544"
-         y="94.529236"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
+         x="413.35193"
+         y="105.16214"
          id="tspan100437">ocean surface</tspan></text>
     <path
        style="fill:none;stroke:#000000;stroke-width:1.20694;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow1Lend)"
@@ -285,20 +290,20 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;line-height:1.25;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.417431"
-       x="141.07307"
-       y="73.453789"
+       x="161.95865"
+       y="69.132317"
        id="text8687"
        transform="scale(0.94316328,1.0602618)"><tspan
          sodipodi:role="line"
-         id="tspan8685"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
-         x="141.07307"
-         y="73.453789">Nutrient-rich river water </tspan><tspan
+         x="161.95865"
+         y="69.132317"
+         id="tspan18774">River water enters ocean, adding </tspan><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
-         x="141.07307"
-         y="94.325417"
-         id="tspan82791">enters ocean</tspan></text>
+         x="161.95865"
+         y="90.003944"
+         id="tspan20500">nutrients and organic matter)</tspan></text>
     <path
        style="fill:none;stroke:#000000;stroke-width:1.31846;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#marker15326)"
        d="m 172.80793,155.17265 v 94.65999"
@@ -306,32 +311,32 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;line-height:1.25;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.417431"
-       x="228.63341"
-       y="142.83443"
+       x="152.2486"
+       y="138.36298"
        id="text17536"
        transform="scale(0.94316328,1.0602618)"><tspan
          sodipodi:role="line"
          id="tspan17534"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.417431"
-         x="228.63341"
-         y="142.83443">Algae reproduce, then die</tspan><tspan
+         x="152.2486"
+         y="138.36298">Algae consume nutrients, reproduce, and die</tspan><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.417431"
-         x="228.63341"
-         y="163.70605"
+         x="152.2486"
+         y="159.2346"
          id="tspan21212" /></text>
     <text
        xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;line-height:1.25;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.417431"
-       x="200.5994"
-       y="204.56839"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;line-height:1.25;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.417431"
+       x="305.35339"
+       y="198.26666"
        id="text30644"
        transform="scale(0.94316328,1.0602618)"><tspan
          sodipodi:role="line"
-         id="tspan30642"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.417431"
-         x="200.5994"
-         y="204.56839">Dead algae fall to the ocean floor</tspan></text>
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
+         x="305.35339"
+         y="198.26666"
+         id="tspan1092">Organics sink to ocean floor</tspan></text>
     <rect
        style="fill:#ff0000;fill-opacity:0;stroke-width:1.41993;stroke-miterlimit:4;stroke-dasharray:none"
        id="rect44042"
@@ -367,7 +372,7 @@
          id="tspan49449"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
          x="323.98657"
-         y="270.10168">Dead algae decompose,</tspan><tspan
+         y="270.10168">Organics decompose,</tspan><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.6973px;font-family:Arial;-inkscape-font-specification:'Arial, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;stroke-width:0.417431"
          x="323.98657"
@@ -462,6 +467,6 @@
        id="text112183"><tspan
          sodipodi:role="line"
          id="tspan112181"
-         style="stroke-width:0.264583"></tspan></text>
+         style="stroke-width:0.264583" /></text>
   </g>
 </svg>
