@@ -415,16 +415,29 @@ sDatList[[1]] %>% dplyr::select(-sE,-sN) %>%
   facet_wrap(~doy,ncol=1)
 
 #mean(abs(residuals)): good idea for future maps
-sDatList[[1]] %>% dplyr::select(-sE,-sN) %>% 
-  mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[1]],doy,sE,sN))) %>% 
-  mutate(resid=PC1-pred) %>% 
-  group_by(loc) %>% summarize(meanRes=mean(resid),sumRes=mean(abs(resid))) %>% 
-  ungroup() %>% left_join(locs,by='loc') %>% 
-  ggplot()+geom_sf(aes(geometry=geometry,col=sumRes),size=0.1)+
-  geom_sf(data=knotLocs,col='red')+
-  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
-  geom_sf(data=bottomWDat)+
-  geom_sf(data=dataBoundary,fill=NA)
+
+for(chunk in 1:length(sDatList)){
+  for(pc in 1:5){
+    load(paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata"))
+    p1 <- sDatList[[chunk]] %>% dplyr::select(-sE,-sN) %>% 
+      mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[chunk]],doy,sE,sN))) %>% 
+      mutate(resid=.data[[paste0('PC',pc)]]-pred) %>% 
+      group_by(loc) %>% summarize(mae=mean(abs(resid))) %>% 
+      ungroup() %>% left_join(locs,by='loc') %>% st_sf() %>% 
+      ggplot()+
+      geom_sf(aes(geometry=geometry,col=mae),size=0.6,shape=15)+
+      geom_sf(data=knotLocs,col='red',size=0.5)+
+      geom_sf(data=bottomWDat,size=0.5)+
+      geom_sf(data=dataBoundary,fill=NA)+
+      scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
+      labs(title=paste0('errMap',chunk,"_pc",pc))
+    
+    ggsave(paste0(storageDir,'errMap',chunk,"_pc",pc,".png"),p1,scale = 2)
+    rm(p1,modList); gc()
+  }
+}
+
+
 
 #Get model performance stats
 sResList <- lapply(sDatList,function(x){
