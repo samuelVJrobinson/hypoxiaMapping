@@ -263,180 +263,6 @@ bottomWDat <- bottomWDat %>% mutate( #Match closest unique location in spectral 
 
 # Fit PC models -----------------------------------
 
-#Approach using soap-film smoothers
-#Testing:
-# #Buffer data area - knots can't be too close to boundary
-# dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
-# #Create sampling zones for knots - idea: many close to the coast, fewer further away
-# zones <- lapply(c(75,150),function(d){
-#   coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
-#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
-#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
-#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
-#     st_intersection(.,dbTemp)
-# })
-#
-# zones[[length(zones)+1]] <- st_difference(dbTemp,zones[[length(zones)+1-1]]) #Creates last zone
-# for(i in (length(zones)-1):2){
-#   zones[[i]] <- st_difference(zones[[i]],zones[[i-1]])
-# }
-# rm(dbTemp)
-#
-# #Looks OK
-#
-# # plot(knotLocs,add=TRUE,pch=19)
-# knotLocs <- mapply(function(z,N){
-#   z %>% st_transform(3401) %>% st_sample(size=N,type='hexagonal') %>% st_transform(st_crs(z))
-# },z=zones,N=c(30,20,20)) %>%
-#   do.call('c',.)
-#
-# plot(dataBoundary)
-# plot(zones[[1]],add=TRUE,col='green') #Looks OK
-# plot(zones[[2]],add=TRUE,col='red')
-# plot(zones[[3]],add=TRUE,col='blue')
-# plot(knotLocs,add=TRUE,pch=19)
-
-# #Strips out knots that are too close - ideally this would use some other kind of approach like simulated annealing to maximize distance between points while holding them within sampling bands
-# minDist <- 30000 #20 km
-# removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Should any knots be removed?
-# while(any(removeKnot)){
-#   knotLocs <- knotLocs[-which(removeKnot)[1],]
-#   removeKnot <- st_distance(knotLocs) %>% apply(.,1,function(x) min(x[x!=0])<minDist) #Checks if any points are closer than minDist
-# }
-
-# # Alternative: constant knot locations
-# knotLocs <- dataBoundary %>% st_transform(3401) %>% st_buffer(-20*1000) %>%
-#   st_transform(st_crs(dataBoundary)) %>%
-#   st_transform(3401) %>% st_sample(size=100,type='hexagonal') %>% st_transform(st_crs(dataBoundary))
-# plot(dataBoundary)
-# plot(knotLocs,add=TRUE,pch=19)
-
-# #Alternative: knots along lines of buffer distances
-# 
-# #Small example - single day
-# knotLocs <- mapply(function(d,N){
-#   dbTemp <- dataBoundary %>% st_transform(3401) %>% st_buffer(-30*1000) %>% st_transform(st_crs(dataBoundary))
-#     coast[[1]][[1]] %>% st_polygon() %>% st_sfc(.,crs=st_crs(coast)) %>% #Only largest segment
-#     st_transform(3401) %>% st_buffer(d*1000) %>% st_sf() %>% st_cast('POLYGON') %>%
-#     mutate(area=as.numeric(st_area(.))) %>% filter(area==max(area)) %>%
-#     st_geometry() %>% st_transform(st_crs(dataBoundary)) %>%
-#     st_cast('LINESTRING') %>% st_intersection(dbTemp,.) %>% #Transforms to line, gets intersection with dbTemp
-#     st_cast('MULTILINESTRING') %>% st_line_merge() %>%  st_transform(3401) %>% #Converts to single line if needed
-#     st_line_sample(n = N,type='regular') %>% #Samples N points along line
-#     st_cast('POINT') %>%  st_transform(st_crs(dataBoundary)) #Transforms back to starting crs
-# },d=c(50,125,225),N=c(30,20,10)) %>%  #Distances = 50,125,
-#   do.call('c',.)
-# 
-# ggplot() + #Looks OK
-#   geom_sf(data=dataBoundary,fill=NA) +
-#   geom_sf(data=slice_sample(sDat2,n=5000),alpha=0.3)+
-#   geom_sf(data=knotLocs,col='red') 
-# 
-# tempDat <- sDat2 %>% filter(doy==211) %>% st_drop_geometry()
-# 
-# #Get knot and boundary locations on same scale
-# 
-# bound <- dataBoundary %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sN,sE)
-# bound <- list(list(sE=bound$sE,sN=bound$sN)) #Convert to list
-# 
-# kts <- knotLocs %>% st_transform(3401) %>%
-#   st_coordinates() %>% data.frame() %>% rename(E=X,N=Y) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   mutate(across(E:N,~round(.x))) %>% dplyr::select(sE,sN)
-# 
-# # with(bound[[1]],plot(sE,sN,type='l')) #Trying same thing with manually placed knots
-# # kts <- locator() #Click on map for knots
-# # names(kts) <- c('sE','sN')
-# # points(kts$sE,kts$sN,pch=19,cex=0.8)
-# # with(kts,inSide(bound,sE,sN)) #Check whether knots are inside boundary
-# # in.out(bnd=bound,x=do.call('cbind',kts))
-# 
-# {a <- Sys.time() #Soap film
-# PCmod1a <- gam(PC1~s(sE,sN,bs='so',xt=list(bnd=bound,nmax=100),k=30),
-#               knots=kts,data=tempDat)
-# Sys.time()-a}
-# 
-# {a <- Sys.time() #Thin-plate
-# PCmod1b <- gam(PC1~s(sE,sN,bs='tp',k=60),data=tempDat)
-# Sys.time()-a}
-# 
-# #Check results
-# mae(PCmod1a); mae(PCmod1b)
-# par(mfrow=c(3,1))
-# plot(PCmod1a)
-# plot(PCmod1b,scheme=2)
-# pal <- colorRampPalette(c("blue", "red"))
-# tempDat$order = findInterval(tempDat$PC1, sort(tempDat$PC1))
-# with(tempDat,plot(sE,sN,col=pal(nrow(tempDat))[order],pch=19,cex=0.5))
-# par(mfrow=c(1,2))
-# plot(predict(PCmod1a),tempDat$PC1,main='Soap film'); abline(0,1,col='red')
-# plot(predict(PCmod1b),tempDat$PC1,main='Thin-plate'); abline(0,1,col='red')
-# par(mfrow=c(1,1))
-# 
-# 
-# #Small example - tensor product smooth across days
-# #Uses a subset of days: 201-221
-# tempDat <- sDat2 %>% filter(doy>=201,doy<=221) %>% st_drop_geometry()
-# tempGeom <- sDat2 %>% filter(doy>=201,doy<=221) %>% st_geometry()
-# 
-# library(parallel)
-# cl <- makeCluster(15)
-# {a <- Sys.time()
-# PCmod1a <- bam(PC1~te(sN,sE,doy,bs=c('sf','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,5),d=c(2,1))+
-#                  te(sN,sE,doy,bs=c('sw','tp'),xt=list(list(bnd=bound,nmax=100),NULL),k=c(30,5),d=c(2,1)),
-#               knots=kts,
-#               data=tempDat,cluster=cl)
-# Sys.time()-a} #Takes 22 seconds
-# 
-# {a <- Sys.time()
-# PCmod1b <-bam(PC1~te(sN,sE,doy,bs=c('tp','tp'),k=c(50,5),d=c(2,1)),
-#               data=tempDat,cluster=cl)
-# Sys.time()-a} #Takes 10 seconds
-# stopCluster(cl)
-# 
-# #Check results
-# mae(PCmod1a); mae(PCmod1b)
-# par(mfrow=c(3,1))
-# plot(PCmod1a,scheme=2)
-# plot(PCmod1b,scheme=2)
-# 
-# par(mfrow=c(1,2))
-# sampRows <- sample(1:nrow(tempDat),size = 5000)
-# plot(predict(PCmod1a)[sampRows],tempDat$PC1[sampRows],main='Soap film'); abline(0,1,col='red')
-# plot(predict(PCmod1b)[sampRows],tempDat$PC1[sampRows],main='Thin-plate'); abline(0,1,col='red')
-# par(mfrow=c(1,1))
-# 
-# #Predicted values
-# dataBoundary %>% st_transform(3401) %>%
-#   st_sample(1000,type='hexagonal') %>%
-#   st_sf() %>%
-#   geom2cols(E,N,removeGeom=FALSE,epsg=3401) %>%  #Louisiana offshore
-#   # st_drop_geometry() %>%
-#   st_transform(4326) %>%
-#   expand_grid(.,doy=c(201,211,221)) %>%
-#   mutate(sE=(E-Emean)/1000,sN=(N-Nmean)/1000) %>% #Center E/N and convert to km
-#   dplyr::select(-E,-N) %>%
-#   mutate(predSoap=predict(PCmod1a,newdata=.),predTP=predict(PCmod1b,newdata=.)) %>%
-#   pivot_longer(cols=c(predSoap,predTP)) %>%
-#   ggplot()+
-#   geom_sf(aes(geometry=geometry,col=value))+
-#   facet_grid(doy~name)
-# 
-# #Error
-# tempDat %>% 
-#   mutate(errSoap=predict(PCmod1a)-tempDat$PC1,errTP=predict(PCmod1b)-tempDat$PC1) %>% 
-#   st_sf(geom=tempGeom) %>% 
-#   filter(doy==201|doy==211|doy==221) %>% 
-#   # dplyr::select(doy,contains('err')) %>% 
-#   pivot_longer(cols=c(errSoap,errTP)) %>%
-#   ggplot()+
-#   geom_sf(aes(geometry=geom,col=value))+
-#   facet_grid(doy~name)+
-#   scale_color_distiller(palette = 'Spectral')
-
 #Full model fits
 # Knots along lines of buffer distances
 knotLocs <- mapply(function(d,N){
@@ -455,6 +281,7 @@ N=c(30,25,20,8) #Points within each distance buffer
 ) %>%
   do.call('c',.)
 
+#Knot locations
 ggplot() + #Looks OK, but some bottom water points are outside boundary of data
   geom_sf(data=dataBoundary,fill=NA) +
   geom_sf(data=slice_sample(sDat2,n=5000),alpha=0.3)+
@@ -476,7 +303,7 @@ kts <- knotLocs %>% st_transform(3401) %>%
 #Goal: split up sDat2 into manageable chunks for soap film smoothing
 
 #Breaks for 5 chunks of data
-doyBreaks <- sDat2 %>% slice(c(1,(nrow(sDat2) %/% 5)*c(1:5))) %>% pull(doy) %>% as.numeric
+(doyBreaks <- sDat2 %>% slice(c(1,(nrow(sDat2) %/% 5)*c(1:5))) %>% pull(doy) %>% as.numeric)
 
 sDat2 %>% st_drop_geometry() %>% group_by(doy) %>% 
   summarize(#propNA=sum(is.na(PC1))/n(),
@@ -587,18 +414,66 @@ sDatList[[1]] %>% dplyr::select(-sE,-sN) %>%
   geom_sf(data=dataBoundary,fill=NA)+
   facet_wrap(~doy,ncol=1)
 
-#Sum(abs(residuals)): really good idea for future maps
+#mean(abs(residuals)): good idea for future maps
 sDatList[[1]] %>% dplyr::select(-sE,-sN) %>% 
   mutate(pred=predModList(modList,newdat = dplyr::select(sDatList[[1]],doy,sE,sN))) %>% 
   mutate(resid=PC1-pred) %>% 
-  group_by(loc) %>% summarize(meanRes=mean(resid),sumRes=sum(abs(resid))) %>% 
+  group_by(loc) %>% summarize(meanRes=mean(resid),sumRes=mean(abs(resid))) %>% 
   ungroup() %>% left_join(locs,by='loc') %>% 
   ggplot()+geom_sf(aes(geometry=geometry,col=sumRes),size=0.1)+
-  # geom_sf(data=knotLocs,col='red')+
+  geom_sf(data=knotLocs,col='red')+
   scale_colour_distiller(type='div',palette = "Spectral",direction=-1)+
   geom_sf(data=bottomWDat)+
   geom_sf(data=dataBoundary,fill=NA)
-  
+
+#Get model performance stats
+sResList <- lapply(sDatList,function(x){
+  x$PC1 <- NA; x$PC2 <- NA; x$PC3 <- NA;
+  x$PC4 <- NA; x$PC5 <- NA 
+  return(x)
+})
+
+#Takes ~1 min
+for(pc in 1:5){ 
+  for(chunk in 1:(length(doyBreaks)-1)){
+    load(paste0(storageDir,"modList",chunk,"_pc",pc,".Rdata"))
+    nd <- sResList[[chunk]][,c('doy','sE','sN')]
+    sResList[[chunk]][,paste0('PC',pc)] <- sDatList[[chunk]][,paste0('PC',pc)] - predModList(modList,newdat = nd) #Actual - predicted
+    rm(modList,nd); gc() #Memory usage fairly heavy
+  }
+}
+
+#Basic statistics
+sResList %>% bind_rows(.id='chunk') %>% dplyr::select(contains('PC')) %>% 
+  pivot_longer(everything()) %>% group_by(name) %>% summarize(mean=mean(value),mae=mae(value),rmse=rmse(value))
+
+#Residuals over time
+sResList %>% bind_rows(.id='chunk') %>% 
+  group_by(doy) %>% 
+  summarize(across(contains('PC'),list(med=median,upr=~quantile(.x,0.95),lwr=~quantile(.x,0.05)))) %>% 
+  pivot_longer(contains('PC')) %>% 
+  separate(name,c('name','stat'),sep='_') %>% 
+  pivot_wider(names_from=stat,values_from = value) %>% 
+  ggplot(aes(x=doy))+geom_ribbon(aes(ymax=upr,ymin=lwr),alpha=0.3)+
+  geom_line(aes(y=med))+
+  facet_wrap(~name,ncol=1)+
+  geom_vline(xintercept = doyBreaks,linetype='dashed')+
+  labs(x='Day of Year',y='Median Error')
+
+#Residuals over space
+sResList %>% bind_rows(.id='chunk') %>% 
+  group_by(loc) %>% 
+  summarize(across(contains('PC'),list(mae=mae,rmse=rmse))) %>% 
+  pivot_longer(contains('PC')) %>% 
+  separate(name,c('name','stat'),sep='_') %>% 
+  left_join(locs,by='loc') %>% st_sf() %>% 
+  ggplot()+
+  geom_sf(aes(col=value),size=0.1)+
+  # geom_sf(data=knotLocs)+ #Knot locations
+  geom_sf(data=bottomWDat,alpha=0.3) + #Data locations
+  geom_sf(data=dataBoundary,fill=NA)+
+  facet_grid(name~stat)+
+  scale_colour_distiller(type='div',palette = "Spectral",direction=-1)
 
 # Get predictions from lagged linear model --------------------
 

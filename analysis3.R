@@ -425,7 +425,8 @@ clusterExport(cluster,c('fitFRmodCV','fdat'))
 cvPredList3 <- parLapply(cl=cluster,1:1000,fitFRmodCV)  #Takes only a few seconds to run
 stopCluster(cluster)
 
-pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% group_by(name) %>% 
+pivot_longer(bind_rows(cvPredList3),RMSE:R2) %>% 
+  group_by(name) %>% 
   summarize(mean=mean(value),med=median(value),max=max(value),min=min(value),iqr=IQR(value))
 
 #What is the shortest lag time that we could use for FR and get similar results?
@@ -529,21 +530,21 @@ fdaErrLag %>% group_by(lag,errType,errType2) %>%
 
 #RMSE
 min(sapply(modList1,rmse)) #Lagged linear regression - PCA
-min(sapply(modList2,rmse)) #Lagged linear regression - PCA with interactions
+# min(sapply(modList2,rmse)) #Lagged linear regression - PCA with interactions
 rmse(bWatMod) #Functional regression - PCA
 
 #Which days do these occur on?
-lags[which.min(sapply(modList1,rmse))] #12-day lag
-lags[which.min(sapply(modList2,rmse))] #0-day lag
+c(0:80)[which.min(sapply(modList1,rmse))] #80-day lag
+c(0:80)[which.min(sapply(modList2,rmse))] #53-day lag with interactions
 
 #MAE
 min(sapply(modList1,mae)) #Lagged linear regression - PCA
-min(sapply(modList2,mae)) #Lagged linear regression - PCA with interactions
+# min(sapply(modList2,mae)) #Lagged linear regression - PCA with interactions
 mae(bWatMod) #Functional regression - PCA
 
 #R2
 max(sapply(modList1,getR2)) #Lagged linear regression - PCA
-max(sapply(modList2,getR2),na.rm=TRUE) #Lagged linear regression - PCA
+# max(sapply(modList2,getR2),na.rm=TRUE) #Lagged linear regression - PCA with interactions
 summary(bWatMod)$r.sq #Functional regression - PCA
 
 #df
@@ -562,6 +563,25 @@ NOTE <- 'Data are quite different from each other, so had to save as separate ob
 save(errLag,NOTE,file = './data/errDat.Rdata')
 
 load('./data/errDat.Rdata')
+
+#Info for Table 1
+errLag %>% #filter(errType2=='Out of Sample') %>% 
+  group_by(lag,errType,modType,errType2) %>% 
+  summarize(medErr=mean(error),iqr=sd(error)) %>% 
+  group_by(errType2,modType,errType) %>% 
+  mutate(medErr=ifelse(errType=='R2',1-medErr,medErr)) %>% #R2 is maximized, not minimized
+  filter(medErr==min(medErr)) %>% 
+  mutate(medErr=ifelse(errType=='R2',1-medErr,medErr)) %>% #Convert back to regular scale
+  mutate(across(c('medErr','iqr'),~as.character(round(.x,3)))) %>% 
+  select(-lag) %>% 
+  unite(err,medErr,iqr,sep='+-') %>% mutate(err=gsub('\\+-0$','',err)) %>% 
+  mutate(errType=factor(errType,levels=c('RMSE','MAE','R2')),
+         modType=factor(modType,levels=c('Lagged Linear','Functional Data Analysis'))) %>% 
+  arrange(desc(errType2),errType,modType) %>% 
+  pivot_wider(names_from = c(errType2,errType),values_from=err)
+  
+  
+
 (p <- errLag %>% 
     group_by(lag,errType,errType2,modType) %>% 
     dplyr::summarize(medErr=median(error),maxErr=max(error),minErr=min(error)) %>% 
@@ -575,4 +595,13 @@ load('./data/errDat.Rdata')
     scale_fill_manual(values=c('grey10','red'))
   )
 ggsave('./figures/outOfSamp_comparison.png',p,width=8,height=8)
+
+
+errLag %>% 
+  group_by(errType,errType2,modType) %>% 
+  summarize()
+
+
+  
+
 
