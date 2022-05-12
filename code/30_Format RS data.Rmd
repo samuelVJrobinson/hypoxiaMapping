@@ -228,14 +228,19 @@ writexl::write_xlsx(x = ds_2sensor_composite_2014, path = fname)
   To link RS with sampling location and sampling date info, and then use this `df_merge` to filter RS data 1-week, 2-week, ..., n-week before the DO sampling. 
 
 ```{r - RS data}
+
 ### 1. load RS data ----------------------------------------------------------------------
+
 ### 1.1 the data used earlier
 fname <- paste0(dir.cleaned, 'sample_2005-2019_ImageBandValue_at_SamplingLocations.RData'); fname
 load(fname)
 df_rs_old <- ds_2sensor_composite
 
 
-### 1.2 need to update the data --> the above data was based on data from `Img2Table_04_2021-03-18`, which extracted pixel values at 500m resolution, which is not correct. Need to use the most updated new data
+
+### 1.2 need to update the data 
+
+### Data in section 1.1 above was based on data from `Img2Table_04_2021-03-18`, which extracted pixel values at 500m resolution, which is not correct. Need to use the most updated new data
 f <- list.files(path = dirname(getwd()), pattern = "^rs_sample_combined_2000_2019.RData", full.names = T, recursive = T)
 f
 if(length(f) > 1) {
@@ -388,10 +393,10 @@ df_merge %>%
   distinct(YEID, yy) %>%
   group_by(yy) %>% tally()
 
-cat('\nHow many days of RS data are attached to each sample location?')
-df_merge %>% 
-  dplyr::mutate(yy = year(Date)) %>%
-  group_by(YEID, yy) %>% tally()
+# cat('\nHow many days of RS data are attached to each sample location?')
+# df_merge %>% 
+#   dplyr::mutate(yy = year(Date)) %>%
+#   group_by(YEID, yy) %>% tally()
 ```
 
 
@@ -399,7 +404,7 @@ df_merge %>%
 
   *Test time-lag*
   
-```{r eval=FALSE, include=FALSE}
+```{r - Test 1 week, eval=FALSE, include=FALSE}
 
 ### '1-week before' image. Range: [t0 - 7*1+1] ~ [t0 - 7*(1-1)]   ---------------------------------------
 nw <- 1
