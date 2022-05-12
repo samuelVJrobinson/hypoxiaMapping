@@ -4,9 +4,9 @@
 ## This function aims to plot multiple maps in one column 
 
 
-func_domap_1col <- function(n_plots, h) {  #@ the total number of plots
+func_domap_1col <- function(n_plots, h, postfix = "") {  #@ the total number of plots
   
-  fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_1col.png"); fname
+  fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_1col", postfix, ".png"); fname
   png(filename = fname, pointsize = 12, width = 7/3, height = h/3*n_plots, units="in", res = 600)
   
   grid.newpage()
