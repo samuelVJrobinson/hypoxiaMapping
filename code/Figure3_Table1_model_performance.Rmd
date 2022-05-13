@@ -1,0 +1,703 @@
+---
+title: "Figure2"
+author: "Yingjie"
+date: "10/7/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+  This script aims to combine sub-plots for Figure 2. 
+
+
+
+# Setup 
+```{r}
+# remove(list = ls())
+
+getwd()
+
+library(tidyverse)
+library(dplyr)
+library(Rmisc) ## `summarySE()` provides standard deviation, standard error of the mean, and a (default 95%) confidence interval
+
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library(tidyquant)
+
+source('helperFunctions.R') ## mae() function
+```
+
+
+
+# Data
+
+
+## Load data from 3 models. 
+  
+```{r - LLR and FDA data}
+
+
+## 1. load llModErr and fdaErr -----------------------------------------------------------
+load(file = './data/errDat.Rdata')
+names(errLag)
+
+
+## --> before 2022/4/20, this data include `llModErr` and `fdaErr` seperately. Here, we need to extract these two from the 
+##     updated data called `errLag`
+# names(errLag)
+  ## "lag"      "errType"  "mean_wse" "med_oose" "max_oose" "min_oose" "modType" 
+# errDat <- errLag %>%
+#   dplyr::rename_with(., ~ (gsub("_oose", "", .x, fixed = TRUE))) %>%
+#   dplyr::rename(trainingSampErr = mean_wse) %>%
+#   dplyr::select(lag, errType, med, max, min, everything())
+
+
+## --> 4/25/2022: updated "errDat.Rdata" that includes all the 1000 replicates. 
+##  there are several options to plot the uncertainty (shade band around the line plot) 
+##  1. use the true min - max range
+##  2. use the 95% quantiles range (to remove potential outliers?)
+##  3. use confidence interval, IPCC AR6 defines >= 90% interval as the "very likely" range.
+
+
+
+# prb <- 0       # to get the actual range (min to max)
+prb <- 2.5/100 # to get 95% quantiles range
+# prb <- 5/100   # to get 90% quantiles range
+
+
+### error data for **testing set** -------------------------------------------------------
+errDat_test <- errLag %>%
+  dplyr::rename(value = error) %>%
+  dplyr::filter(errType2 == "Out of Sample") %>%
+  dplyr::select(-errType2) %>%
+  group_by(modType, lag, errType) %>%
+  slice_sample(n = 20) %>%
+  dplyr::summarise(med = median(value, na.rm = T),
+                   avg = mean(value, na.rm = T),
+                   iqr = IQR(value, na.rm = T),
+                   ## --> for the max and min, we can either use the actual max, min, or 95% quantiles range
+                   # max = max(value, na.rm = T), 
+                   # min = min(value, na.rm = T),
+                   min = quantile(value, prb),
+                   max = quantile(value, probs = 1-prb),
+                   ### --> or use confidence interval ---
+                   lci = CI(value, ci = 0.95)['lower'],
+                   uci = CI(value, ci = 0.95)['upper']
+                   # avg1 = CI(value)['mean']
+                   ) %>%
+  dplyr::select(modType, lag, errType, med, max, min, everything())
+
+
+
+
+### error data for **training set** ------------------------------------------------------
+errDat_train <- errLag %>%
+  dplyr::rename(value = error) %>%
+  dplyr::filter(errType2 == "Within Sample") %>%
+  dplyr::select(-errType2) %>%
+  group_by(modType, lag, errType) %>%
+  dplyr::rename(trainingSampErr = value) %>%
+  as.data.frame()
+
+### put both in one file
+errDat <- merge(errDat_test, errDat_train, by = c("modType", "lag", "errType"))
+
+
+
+## filter out data for each model --------------------------------------------------------
+llModErr <- errDat %>%
+  dplyr::filter(modType == 'Lagged Linear') %>%
+  dplyr::select(-modType)
+
+
+fdaErr  <- errDat %>%
+  dplyr::filter(modType == 'Functional Data Analysis')%>%
+  dplyr::select(-modType)
+```
+
+
+
+```{r - RF data}
+## 2. load RF model error data --------------------------------------------------------------------
+fname <- paste0('./data/results_RF/err_rf_Day_DObottom_2014_2014.Rdata'); fname
+load(fname)
+##
+## * This loaded file includes two data sets
+##    `err_rf`:        model errors for the testing set
+##    `err_rf_train`:  model errors for the training set
+##
+
+
+
+## for the testing set -------------------------------------------------------------------
+acc_set <- 'testing'
+
+### input data for plotting 
+err_rf_test <- err_rf %>%
+  gather(key = 'errType', value = 'value', RMSE:R2) %>%
+  dplyr::mutate(errType = factor(errType, levels = c('R2', 'RMSE', 'MAE')))
+
+### option 1. use mean, se OR sd,for plotting ----
+
+# rfErr_test <- summarySE(data = err_rf_test, measurevar="value", groupvars=c("year", "nw", "errType")) %>%
+#   dplyr::select(-year, -N) %>%
+#   dplyr::rename(lag = nw)
+
+
+
+### option 2. use median, max, min for plotting -----
+rfErr_test <- err_rf_test %>%
+  dplyr::select(-year) %>%
+  dplyr::rename(lag = nw) %>%
+  group_by(lag, errType) %>%
+  slice_sample(n = 20) %>%
+  dplyr::summarise(med = median(value, na.rm = T),
+                   # max = max(value, na.rm = T), 
+                   # min = min(value, na.rm = T), 
+                   min = quantile(value, prb),
+                   max = quantile(value, probs = 1-prb),
+                   avg = mean(value, na.rm = T),
+                   iqr = IQR(value, na.rm = T),       ## IQR = Q3-Q1 ('Interquartile Range' = 'third quartile' - 'first quartile')
+                   lci = CI(value, ci = 0.95)['lower'],
+                   uci = CI(value, ci = 0.95)['upper']
+                   ) %>% 
+  # dplyr::select(-avg, -iqr) %>% ## updated on 4/21/2022 using new data
+  dplyr::mutate(trainingSampErr = NA) %>%
+  dplyr::filter(lag <= 80) %>%
+  as.data.frame()
+  
+
+
+
+## for the training set ------------------------------------------------------------------
+## --> add within-sample-error (i.e., training accuracy) of RF model
+rfErr_train <- err_rf_train %>%
+  gather(key = 'errType', value = 'value', RMSE:R2) %>%
+  dplyr::mutate(errType = factor(errType, levels = c('R2', 'RMSE', 'MAE'))) %>%
+  dplyr::select(-year) %>%
+  dplyr::rename(lag = nw) %>%
+  group_by(lag, errType) %>%
+  dplyr::summarise(med = median(value, na.rm = T), ## median
+                   # max = max(value, na.rm = T), 
+                   # min = min(value, na.rm = T), 
+                   min = quantile(value, prb),
+                   max = quantile(value, probs = 1-prb),
+                   avg = mean(value, na.rm = T),
+                   sd  = sd(value, na.rm = T),
+                   iqr = IQR(value, na.rm = T)) %>%
+  # dplyr::select(-avg, -iqr) %>%
+  dplyr::filter(lag <=80) %>%
+  as.data.frame()
+
+## --> final RF 
+rfErr_test$trainingSampErr <- rfErr_train$avg
+
+
+
+
+
+## 3. fix and unify the data frame format ------------------------------------------------
+
+names(fdaErr)
+names(llModErr)
+names(rfErr_test)
+
+## make sure `fdaErr` is the same format as `llModErr`
+# fdaErr <- fdaErr %>% 
+#   dplyr::rename(errType=name, 
+#                 max = upr, 
+#                 min = lwr) %>%
+#   dplyr::mutate(iqr = NA) %>%
+#   dplyr::select(names(llModErr))
+
+
+
+# names(fdaErr)
+# fdaErr_na10 <- fdaErr %>%
+#   dplyr::filter(lag < 20) %>%
+#   dplyr::mutate(lag = lag - 10) %>%
+#   dplyr::mutate_at(vars(med:trainingSampErr), ~replace(., is.numeric(.), NA))
+#   # dplyr::mutate_at(c("med","max","min","iqr","trainingSampErr"), as.na(), na.rm = TRUE)
+# 
+# fdaErr <- rbind(fdaErr, fdaErr_na10)
+
+
+
+## 4. get the complete_rate of RS band 
+
+complete_rate <- err_rf %>%
+  distinct(year, nw, complete_rate_avg) %>%
+  dplyr::mutate(nw = - nw) %>%
+  dplyr::rename(lag = nw)
+
+mean(complete_rate$complete_rate_avg) ## 0.35
+
+complete_rate %>%
+  dplyr::filter(lag >= -80) %>%
+  ggplot() +
+  geom_line(aes(x = lag, y = complete_rate_avg), color = 'orange') +
+  theme_bw()
+```
+
+
+
+
+
+## Table 1 - result summary
+
+  This table reports the accuracy information based on best time windows (or time lag) we choose for model inputs. 
+  
+  For "Training error", we report the `median` values for each model and each indicator;
+  
+  For "Testing error",  we *additionally* report the `lower and upper percentiles`. 
+
+```{r}
+names(rfErr_test)
+
+
+### for training data set ----------------------------------------------------------------
+
+### --> 1. if look at the most recent 4 days
+# rfErr_train %>%
+#   ungroup() %>%
+#   dplyr::filter(lag < 5) %>%
+#   group_by(errType) %>%
+#   # dplyr::summarise() %>%
+#   arrange(errType, desc(med)) %>%
+#   as.data.frame()
+
+
+### --> 2. if look at the whole 80 days range
+err_rf_train %>%
+  gather(key = 'errType', value = 'value', RMSE:R2) %>%
+  dplyr::mutate(errType = factor(errType, levels = c('R2', 'RMSE', 'MAE'))) %>%
+  dplyr::select(-year) %>%
+  dplyr::rename(lag = nw) %>%
+  # dplyr::filter(lag < 5) %>%
+  dplyr::filter(lag < 5) %>%
+  group_by(errType) %>%
+  dplyr::summarise(
+    # med = median(value, na.rm = T), ## median
+                   # max = max(value, na.rm = T), 
+                   # min = min(value, na.rm = T), 
+                   # min = quantile(value, prb),
+                   # max = quantile(value, probs = 1-prb),
+                   avg = mean(value, na.rm = T),
+                   sd = sd(value, na.rm = T),
+                   iqr = IQR(value, na.rm = T)) %>%
+  as.data.frame()
+
+
+
+
+
+
+
+
+### for testing data set -----------------------------------------------------------------
+# rfErr_test %>% 
+#   ungroup() %>%
+#   dplyr::filter(lag < 5) %>%
+#   group_by(errType) %>%
+#   # dplyr::summarise() %>%
+#   arrange(errType, desc(med)) %>%
+#   as.data.frame()
+
+library(plotrix)
+
+err_rf_test %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-year) %>%
+  dplyr::rename(lag = nw) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(lag < 5) %>%
+  dplyr::group_by(errType) %>%
+  dplyr::summarise(
+    # med = median(value, na.rm = T),
+    # q1 = quantile(value, probs = 1/4) %>% as.numeric(),
+    # q3 = quantile(value, probs = 3/4) %>% as.numeric(),
+    # d1 = q1 - med,
+    # d3 = q3 - med,
+    avg = mean(value, na.rm = T),
+    sd = sd(value, na.rm = T),
+    # n  = n(),
+    # lse = STDERR(value)['lower'], ## lower standard error
+    # lse = STDERR(value)['upper'],
+    # mse = STDERR(value)['mean'],
+    # se2 = std.error(value),
+    # lse2 = mse + se2,
+    lci = CI(value, ci = 0.9)['lower'],
+    uci = CI(value, ci = 0.9)['upper']
+                   
+                   ) %>% 
+  dplyr::mutate(trainingSampErr = NA) %>%
+  as.data.frame()
+
+
+```
+
+
+
+## Plot 3 models 
+
+```{r}
+### 1. options to plot lines -------------------------------------------------------------
+# line_to_be_plot <- "med" ## use `median` values to plot the lines
+line_to_be_plot <- "avg"   ## use `mean`
+
+
+### 2. options to plot shade -------------------------------------------------------------
+# upper = 'max'; lower = 'min'
+upper = 'uci'; lower = 'lci'
+
+
+
+### 3. range of lag to plot --------------------------------------------------------------
+lag_range <- 30
+lag_range <- 80
+lag_range <- 60
+
+
+### 4. if to plot the complete_rate of data 
+complete_rate_add <- T
+# complete_rate_add <- F
+
+
+complete_rate_dat <- complete_rate %>% dplyr::filter(lag >= -lag_range)
+
+if(complete_rate_add == T) {
+  complete_rate_alpha <- 1
+} else {
+  complete_rate_alpha <- 0
+}
+                  
+
+
+
+### 5. 
+if_smooth <- F
+# if_smooth <- T
+
+bandwidth_smooth <- ifelse(if_smooth == T, 5, NA)
+
+
+
+
+### plot ---------------------------------------------------------------------------------
+model_fullname <- c('Functional Data Analysis', 'Lagged Linear Regression', 'Random Forest Regression')
+model_levels   <- c('FDA', 'LLR', 'RFR')
+
+## 1. the input data for plot
+err_3models <- rbind(llModErr   %>% dplyr::mutate(mod = 'LLR'),
+                     fdaErr     %>% dplyr::mutate(mod = 'FDA'),
+                     rfErr_test %>% dplyr::mutate(mod = 'RFR')) %>%
+  dplyr::mutate(lag = -lag) %>%
+  dplyr::rename('value' = all_of(line_to_be_plot)) %>%
+  dplyr::rename('upper' = all_of(upper)) %>%
+  dplyr::rename('lower' = all_of(lower)) %>%
+  
+  dplyr::filter(lag >= -lag_range) %>%
+  
+  group_by(mod, errType) %>%
+  # dplyr::mutate(med_avg = mean(value, rm.na = T)) %>% ## to get the mean of mean (or median) value
+  ungroup() %>%
+  arrange(mod, errType) %>%
+  dplyr::mutate(mod     = factor(mod,     levels = model_levels, labels = model_fullname),
+                errType = factor(errType, levels = c('MAE', 'RMSE', 'R2'))) %>%
+  dplyr::select(lag, errType, value, everything()) %>%
+  as.data.frame()
+
+
+str(err_3models)
+
+## 2. identify the best day by looking for the date with the highest model accuracy 
+# err_3models_bestday <- err_3models %>% 
+#   dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
+#   group_by(mod, errType) %>%
+#   dplyr::mutate(best    = ifelse(errType != 'R2', min(med), max(med, na.rm = T)),
+#                 bestday = ifelse(med == best, lag, NA)) %>%
+#   arrange(mod, errType, med) %>%
+#   # dplyr::filter(!is.na(bestday)) %>%
+#   as.data.frame()
+
+
+
+
+### smooth the results -------------------------------------------------------------------
+err_ls <- unique(err_3models$errType) %>% as.character(); err_ls
+mod_ls <- unique(err_3models$mod) %>% as.character()
+
+err_3models_smooth <- data.frame()
+
+
+for (m in mod_ls) {
+  print(m)
+  
+  for (e in err_ls) {
+    print(e)
+  
+    df0 <- err_3models %>% 
+      ungroup() %>%
+      as.data.frame() %>%
+      # dplyr::mutate(mod = as.character(mod)) %>%
+      dplyr::filter(mod == m) %>%
+      dplyr::filter(errType == e)
+    
+    df1 <- ksmooth(x = df0$lag, y = df0$value, 'normal', bandwidth=bandwidth_smooth, n = nrow(df0)) %>% 
+      as.data.frame() %>%
+      dplyr::rename(lag = x, value = y) %>%
+      left_join(x = df0 %>% dplyr::select(-value), 
+                y = ., 
+                by = 'lag') 
+    
+    err_3models_smooth <- rbind(err_3models_smooth, df1)
+}
+}
+
+
+if (if_smooth == T) {
+  err_3models_input <- err_3models_smooth
+} else {
+  err_3models_input <- err_3models
+}
+
+
+
+
+
+
+
+
+### 3. plot ------------------------------------------------------------------------------
+
+lag_max <- max(err_3models_input$lag, na.rm = T); lag_max
+lag_min <- min(err_3models_input$lag, na.rm = T); lag_min
+
+
+(p <- ggplot(data = err_3models_input %>% dplyr::rename(Training = trainingSampErr), 
+             aes(x=lag, y=value), size = 0.5)+
+   
+    # geom_line()+
+    geom_point(shape = 16, size = .8, alpha = 0.3)+
+    geom_line(aes(y=Training, color = 'Training'), 
+              # col='red', 
+              size  = 0.4,
+              alpha = 0.4, linetype = 'solid', show.legend = T)+ ## 'dashed', 'dotted'
+   #  labs(colour="Datasets",x="xxx",y="yyy")+
+   # scale_color_manual(values = c("blue","red"))+
+   # scale_color_viridis() +
+    geom_line(data = complete_rate_dat, aes(x = lag, y = complete_rate_avg), color = 'orange', alpha = complete_rate_alpha) +
+    # geom_ribbon(aes(ymax = upper, ymin = lower), alpha = 0.2)+
+    geom_smooth(method = 'loess', span = 0.27, formula = 'y~x', linetype=1, color = 'gray40', size = 0.4) +
+    
+    scale_x_continuous(breaks = seq(lag_min, lag_max, 10), limits = c(lag_min, lag_max)) +
+    
+    ## --> To highlight the best data range for prediction  
+    # geom_vline(data = err_3models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+   geom_vline(xintercept = -30, linetype = 'dashed', alpha = 0.3) +
+   geom_rect(
+      # data = data.frame(mod = factor(c('Lagged Linear Regression'))), ## not to add 'rect' for FDA
+      data = data.frame(mod = factor(model_fullname[1:3])), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=lag_min,xmax=-30, ymin=-Inf, ymax=Inf),
+      fill = 'gray', alpha=0.2, show.legend = F) +
+    geom_rect(
+      data = data.frame(mod = factor(c('Random Forest Regression'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-4,xmax=0, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.3) + 
+    geom_rect(
+      data = data.frame(mod = factor(c('Lagged Linear Regression', 'Random Forest Regression'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-19,xmax=-15, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.1, show.legend = F) + 
+   
+   # geom_hline(yintercept = 0.6, linetype = 'dashed', alpha = 0.3) +
+    facet_grid(errType~mod, scales = 'free_y', switch = 'y')+
+    labs(x='Time lag', y='Model Accuracy') +
+   
+     scale_colour_manual(name = "Legend",
+                         values = c("Testing" = "black", "Training"= "red")) +
+   
+   
+    theme_bw() +
+    theme(
+          legend.position = c(0.25, 0.74), ## right side: 0.92, 0.74
+          legend.key=element_blank(),  ## remove the key background
+          legend.key.height = unit(0.01, 'npc'),
+          legend.title = element_blank(),
+          legend.background = element_rect(fill='transparent'),
+          legend.box.background = element_rect(fill='transparent', color = 'transparent'), 
+          panel.grid.minor = element_blank())
+)
+# library(lemon)
+# reposition_legend(p, 'left')
+# ggsave('./figures/accuracy_comparison_3models80d.png', p, width=7, height=5)
+
+
+fname <- paste0('./figures/accuracy_comparison_3models80d_legend', 
+                '95CI_lagRange', lag_range, '_',
+                rf_na.action, '_addN-', complete_rate_add,
+                '0.png'); fname
+ggsave(filename = fname, p, width=7, height=5)
+```
+
+
+
+
+```{r - plot with legend}
+## 1. the input data for plot
+err_3models_long <- err_3models_input %>%
+  gather(key = set, value = value, c(value, trainingSampErr)) %>%
+  as.data.frame() %>%
+  dplyr::mutate(set = as.factor(set))
+
+err_3models_long$set = factor(x = err_3models_long$set, levels = c('value', 'trainingSampErr'), labels = c('Testing', 'Training'))
+
+levels(err_3models_long$mod)
+
+lag_max <- max(err_3models_long$lag, na.rm = T); lag_max
+lag_min <- min(err_3models_long$lag, na.rm = T); lag_min
+
+### 3. plot
+(p <- ggplot(data = err_3models_long, aes(x=lag, y=value))+
+    
+    geom_line(data = complete_rate_dat, aes(x = lag, y = complete_rate_avg), color = 'orange', alpha = complete_rate_alpha) +
+    
+    geom_line(aes(color = set, linetype = set), size = 0.3)+
+    scale_colour_manual(values = c('black', 'red')) +
+    
+    # geom_point(
+    #   data = err_3models_long %>% filter(set == 'Testing'),
+    #   shape = 16, alpha = 0.2)+
+
+    # scale_linetype_manual(values = c('solid', 'dashed')) +
+    scale_linetype_manual(values = c('solid', 'solid')) +
+    geom_ribbon(aes(ymax = upper, ymin = lower), alpha = 0.2, show.legend = F)+
+    # geom_smooth(span = 0.26, formula = 'y~x', linetype=1, color = 'gray40', size = 0.5) +
+    
+    ## --> To highlight the best data range for prediction  
+    geom_vline(xintercept = -30, linetype = 'dashed', alpha = 0.3) +
+    geom_rect(
+      # data = data.frame(mod = factor(c('Lagged Linear Regression'))), ## not to add 'rect' for FDA
+      data = data.frame(mod = factor(model_fullname[1:3])), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=lag_min,xmax=-30, ymin=-Inf, ymax=Inf),
+      fill = 'gray', alpha=0.2, show.legend = F) +
+    geom_rect(
+      data = data.frame(mod = factor(c('Random Forest Regression'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-4,xmax=0, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.1, show.legend = F) + 
+    geom_rect(
+      data = data.frame(mod = factor(c('Lagged Linear Regression'))), ## not to add 'rect' for FDA
+      aes(x = NULL, y = NULL, xmin=-19,xmax=-15, ymin=-Inf, ymax=Inf), 
+      fill = 'blue', alpha=0.1, show.legend = F) + 
+    facet_grid(errType~mod, scales = 'free_y', switch = "y")+
+    scale_x_continuous(breaks = seq(lag_min, lag_max, 10), limits = c(lag_min, lag_max)) +
+    labs(x='Time lag', y='Model Accuracy') +
+    theme_bw() +
+    theme(legend.position = c(0.25, 0.74), ## right side: 0.92, 0.74
+          legend.key=element_blank(),  ## remove the key background
+          legend.key.height = unit(0.01, 'npc'),
+          legend.title = element_blank(),
+          legend.background = element_rect(fill='transparent'),
+          legend.box.background = element_rect(fill='transparent', color = 'transparent'), 
+          panel.grid.minor = element_blank())
+)
+
+# fname <- paste0('./figures/accuracy_comparison_3models80d_legend', (1-prb*2)*100, '.png'); fname
+fname <- paste0('./figures/accuracy_comparison_3models80d_legend', 
+                '95CI_lagRange', lag_range, '_',
+                rf_na.action, '_addN-', complete_rate_add,
+                '1.png'); fname
+ggsave(filename = fname, p, width=7, height=5)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+***************************** THE END ***************************** 
+
+**The following code was used for FDA results without testing accuracy when feeding in different time ranges data**
+
+  Tried `mean` value too, and it looks `mean` value is easier to identify the *best day*. 
+  
+  --> also thinking about to highlight days with higher accuracy then the average of (medians)
+  
+  --> but still, no clear pattern found. So, just present the trends of `median`...
+  
+```{r eval=FALSE, include=FALSE}
+
+## 1. the input data for plot
+err_2models <- rbind(llModErr %>% dplyr::mutate(mod = 'LLR'),
+                     rfErr_test    %>% dplyr::mutate(mod = 'RFR')) %>%
+  dplyr::mutate(lag = -lag) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(med_avg = mean(med, rm.na = T)) %>% ## to get the mean of median value
+  ungroup() %>%
+  arrange(mod, errType) %>%
+  as.data.frame()
+
+
+
+## 2. identify the best day by looking for the date with the highest model accuracy 
+err_2models_bestday <- err_2models %>% 
+  dplyr::mutate(mod = as.factor(mod), errType = as.factor(errType)) %>%
+  group_by(mod, errType) %>%
+  dplyr::mutate(best    = ifelse(errType != 'R2', min(med), max(med, na.rm = T)),
+                bestday = ifelse(med == best, lag, NA)) %>%
+  arrange(mod, errType, med) %>%
+  # dplyr::filter(!is.na(bestday)) %>%
+  as.data.frame()
+
+### - to add the 2nd best day as well?
+err_2models_bestday21 <- err_2models %>% 
+  ungroup() %>%
+  dplyr::filter(errType != 'R2') %>%
+  dplyr::group_by(mod, errType) %>%
+  arrange(mod, errType, med) %>%
+  dplyr::slice(2) %>%
+  dplyr::mutate(bestday = lag) %>%
+  as.data.frame()
+
+err_2models_bestday22 <- err_2models %>% 
+  ungroup() %>%
+  dplyr::filter(errType == 'R2') %>%
+  dplyr::group_by(mod, errType) %>%
+  arrange(mod, errType, desc(med)) %>%
+  dplyr::slice(2) %>%
+  dplyr::mutate(bestday = lag) %>%
+  as.data.frame()
+
+err_2models_bestday2 <- rbind(err_2models_bestday21, err_2models_bestday22)
+
+
+
+
+### 3. plot
+(p1 <- ggplot(err_2models, aes(x=lag, y=med))+
+    geom_ribbon(aes(ymax=max,ymin=min),alpha=0.3)+
+    # geom_line(aes(color = ifelse(med>med_avg, 1, 2)))+                  # size = ifelse(med>med_avg, 1, 0.5)
+    geom_line()+
+    scale_color_viridis() +
+    geom_line(aes(y=trainingSampErr),col='red')+
+    geom_vline(data = err_2models_bestday,  aes(xintercept = bestday), linetype = "dashed", color="blue") + 
+    # geom_vline(data = err_2models_bestday2, aes(xintercept = bestday), linetype = "dashed", color="green") +  ## --> not good
+    facet_grid(errType~mod, scales = 'free_y')+
+    labs(x='Time lag',y='Model Accuracy') +
+    theme_bw()
+)
+```
+
+
+
+
+
+

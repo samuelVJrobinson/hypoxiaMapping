@@ -9,7 +9,14 @@ editor_options:
 
 
 
-# Package
+**Intro**
+
+  The data used to plot hypoxia maps are generated from GEE. See section `Package and Dirs` for details. 
+  
+
+
+
+# Package and Dirs
 
 ```{r}
 remove(list = ls())
@@ -23,6 +30,13 @@ library(grid)
 library(tidyverse)
 library(viridis)
 library(RColorBrewer)
+
+
+
+## data path
+dir.do.tif <- './data/data_from_gee/predict_do_maps_lag10d/'    ## 2021-11-24 (first submission)
+dir.do.tif <- './data/data_from_gee/predict_do_maps_lag10d_R1'  ## 2022-05-10
+
 ```
 
 
@@ -35,8 +49,6 @@ library(RColorBrewer)
 which_dat <- "RF"
 which_do  <- "meanDO"
   
-## data path
-dir.do.tif <- './data/data_from_gee/predict_do_maps_lag10d/'
 
 
 ## raster
@@ -94,14 +106,14 @@ usa <- sf::st_read(shp) %>%
 usa_gulf <- st_crop(usa, bhu_bb_sf)
 # plot(usa_gulf)
 
-save(bhu_bb, bhu_bb3, riv, usa, file = './data/helper_data_map.RData')
+# save(bhu_bb, bhu_bb3, riv, usa, file = './data/helper_data_map.RData')
 ```
 
 
 
 # Plot
 
-## dz freq map
+## dz freq map (NOT use this one --> see ArcGIS version)
 
 ```{r}
 
@@ -117,7 +129,9 @@ dz_freq <-
   tm_shape(riv) + tm_lines(col = "royalblue1", lwd = 1.5, legend.col.show = F, legend.lwd.show = F) +
   tm_layout(legend.position= c("left", "bottom"), bg.color = 'black', legend.text.color = 'white', legend.title.color= 'white')
 dz_freq
-tmap_save(dz_freq, filename="./figures/dz_freq.png", height=3, width=7, units="in", dpi=300)
+
+## save plot ----
+# tmap_save(dz_freq, filename="./figures/dz_freq.png", height=3, width=7, units="in", dpi=300)
 
 
 
@@ -172,9 +186,7 @@ domap
 ```
 
 
-
-## Loop plot
-```{r}
+```{r - Loop plot}
 ras_ls <- list.files(path = dir.do.tif, pattern = '^do_map_2014', full.names = T); ras_ls
 
 bg_color = '#4575B4' ## blue, same as the 'sea'
@@ -225,9 +237,9 @@ domap_ls <- mget(ls(pattern = '^domap_2014'))
 ### put maps on a panel - 1 cols
 
 
-source('./func_domap_1col.R')
+source('./code/func_domap_1col.R')
 # func_domap_1col(n_plots = 9, h = 3.2)
-func_domap_1col(n_plots = 9, h = 3.2/2)
+func_domap_1col(n_plots = 9, h = 3.2/2, postfix = "_R1.1")
 ```
 
 
@@ -260,12 +272,15 @@ domap <-
             legend.text.color = 'black', 
             legend.title.color= 'black'))
 fname <- paste0("./figures/do_maps_", "legend.png"); fname
-tmap_save(map_legend, filename=fname, height=3, width=3, units="in", dpi=300)
+# tmap_save(map_legend, filename=fname, height=3, width=3, units="in", dpi=300)
 
 ```
 
 
 
+
+
+  *Test ONLY* but not used. 
   put maps on a panel - 3 cols
 
 ```{r eval=FALSE, include=FALSE}

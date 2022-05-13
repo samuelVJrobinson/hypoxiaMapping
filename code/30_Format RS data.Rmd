@@ -380,6 +380,11 @@ df_merge <- merge(x = df_rs, y = df_do_unique, by = 'YEID', all.y = T) %>% ## th
   dplyr::select(YEID, Date, date_img, everything()) %>%
   arrange(YEID, Date, date_img)
 # str(df_merge)
+
+
+getwd()
+f <- paste0(dir.cleaned, 'df_merge.RData'); f
+save(df_merge, file = f)
 ```
 
 
@@ -400,11 +405,19 @@ df_merge %>%
 ```
 
 
-## Link DO-RS by date lags
+## 1. Filter RS by lags (No DO)
 
   *Test time-lag*
   
-```{r - Test 1 week, eval=FALSE, include=FALSE}
+  
+```{r - Load data}
+f <- paste0(dir.cleaned, 'df_merge.RData'); f
+
+load(f)
+```
+
+  
+```{r - Test , eval=FALSE, include=FALSE}
 
 ### '1-week before' image. Range: [t0 - 7*1+1] ~ [t0 - 7*(1-1)]   ---------------------------------------
 nw <- 1
@@ -478,18 +491,25 @@ df_merge_1w_comp2014 <- df_merge_1w_comp %>%
   - save data in each time-lagas separate xlsx file
   - save data in each year as separate xlsx file. 
   
-```{r - Loop 1-8 week}
+```{r - Loop by date range}
 ### put the averaged spectrum data 1-week and n-week before in one table -----------------
 
 interval <- 7  ## every one week as the time lag unit
 interval <- 10 ## every 10 days  as the time lag unit
+interval <- 5
 
 yrmin <- min(year(df_merge$Date), na.rm = T)
 yrmax <- max(year(df_merge$Date), na.rm = T)
 
 df_merge_nw_comps <- data.frame()
 
-for (nw in seq(1,8)) {
+
+time_range <- 80 ## look at time-lag range up to 80 days (2 month + 20 days buffer)
+
+### get the total number of chunks 
+nn <- ceiling(time_range/interval)
+
+for (nw in seq(1, nn)) {
   # print(nw)
   
   df_merge_nw <- df_merge %>%
@@ -525,49 +545,8 @@ for (nw in seq(1,8)) {
 
 
 
-```{r - Loop by year - 2014 only}
-### loop years, and save data in each year as separate xlsx file ----------------------------------------------
-for (yr in 2014:2014) {
-  # print(yr)
-  df_yr <- df_merge %>%
-    ungroup() %>%
-    dplyr::mutate(year = year(Date)) %>%
-    dplyr::filter(year == yr)
-  print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
-
-  fname <- paste0(dir.cleaned, 'by_year/sample_', yr, '_ImageBandValue_at_SamplingLocations.xlsx'); 
-  print(fname)
-  writexl::write_xlsx(x = df_yr, path = fname)
-}
-```
-
-
-
-
-```{r - Loop by year - 2014 for Sam}
-### data for Sam
-yr <- 2014 
-
-df_yr <- df_merge %>%
-  ungroup() %>%
-  dplyr::mutate(year = year(Date)) %>%
-  dplyr::filter(year == yr) %>%
-  dplyr::select(-Date, -year)
-
-print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
-
-# fname <- './data/sample_spectralData3.xlsx'
-# writexl::write_xlsx(x = df_yr, path = fname)
-
-fname <- './data/sample_spectralData3.csv'
-readr::write_csv(x = df_yr, file = fname)
-```
-
-
-
-
-  Per request by the RSE reviewer, we expanded the lags from 0-30 days to 0-60 days.
-```{r - Loop 0-90 days, include=FALSE}
+  Per request by the RSE reviewer, we expanded the lags from 0-30 days to 0-90 days.
+```{r - Loop by day 0-90, eval=FALSE, include=FALSE}
 
 # for (nw in seq(0 ,30)) {
 for (nw in seq(0,90)) {
@@ -600,6 +579,51 @@ for (nw in seq(0,90)) {
 ```
 
 
+
+** why do this? -- NOT USED
+
+```{r - Loop by year - 2014 only, eval=FALSE, include=FALSE}
+### loop years, and save data in each year as separate xlsx file ----------------------------------------------
+for (yr in 2014:2014) {
+  # print(yr)
+  df_yr <- df_merge %>%
+    ungroup() %>%
+    dplyr::mutate(year = year(Date)) %>%
+    dplyr::filter(year == yr)
+  print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
+
+  fname <- paste0(dir.cleaned, 'by_year/sample_', yr, '_ImageBandValue_at_SamplingLocations.xlsx'); 
+  print(fname)
+  # writexl::write_xlsx(x = df_yr, path = fname)
+}
+```
+
+
+
+
+```{r - Loop by year - 2014 for Sam, eval=FALSE, include=FALSE}
+### data for Sam
+yr <- 2014 
+
+df_yr <- df_merge %>%
+  ungroup() %>%
+  dplyr::mutate(year = year(Date)) %>%
+  dplyr::filter(year == yr) %>%
+  dplyr::select(-Date, -year)
+
+print(paste0('In ', yr, ', there are ', length(unique(df_yr$YEID)), ' sampling locations with composite date.'))
+
+# fname <- './data/sample_spectralData3.xlsx'
+# writexl::write_xlsx(x = df_yr, path = fname)
+
+fname <- './data/sample_spectralData3.csv'
+readr::write_csv(x = df_yr, file = fname)
+```
+
+
+
+
+
   Check the data - number of sampling locations.
   
   To see if the new derived data are the same as the data derived on 2021-09-10. 
@@ -626,13 +650,13 @@ t2df <- readxl::read_excel(t2) %>%
 
 
 
-## Link RS with DO
+## 2. Link DO to each `RS lag`
 
   - The *xlsx data* will be used in *`R`* script to explore the relationship between `DO` and `spectrum bands`. 
   - The *shp data*  will be uploaded to GEE to train RF model for classification/regression. 
 
   
-```{r DO input, paged.print=FALSE}
+```{r - DO input, paged.print=FALSE}
 ### 1. DO data with sampling date --------------------------------------------------------
 
 ### 1.1. if choosing the 'min DO' in the profile
@@ -676,7 +700,7 @@ df_do_toBeLinked %>%
 
 
 
-```{r link with DO - by day, include=FALSE}
+```{r - Link with DO - by day, eval=FALSE, include=FALSE}
 
 ### DO data with sampling date -------------------------------------------------------------------------
 
@@ -707,21 +731,16 @@ for (nw in seq(0, 90)) {
 
 
 
-```{r link with DO - by date range, message=FALSE, warning=FALSE, include=FALSE}
+```{r - Link with DO - by date range, message=FALSE, warning=FALSE, include=FALSE}
 ### 2. To choose which data as the input
 
 # prefix <- '_weekBefore';                       prefix # the weekly one 
 
-interval <- 7  ## every  7 days as the time lag unit
-interval <- 10 ## every 10 days as the time lag unit
-# interval <-  5 ## every 10 days as the time lag unit
 
 prefix <- paste0('_', interval, 'DaysBefore'); prefix # the every 10 days one
 
-time_range <- 80 ## look at time-lag range up to 80 days (2 month + 20 days buffer)
-slots      <- ceiling(time_range/interval); slots ## round up the number
 
-for (nw in seq(1, slots)) {
+for (nw in seq(1, nn)) {
   # print(nw)
   
   ### read in cleaned spectrum band data (time lag 1-8 week)
@@ -730,11 +749,9 @@ for (nw in seq(1, slots)) {
   f_rs <- readxl::read_excel(fname) 
   
   ### join DO table and spectrum table ---------------
-  f <- merge(x = f_rs, 
-             y = df_do_toBeLinked, by = 'YEID') 
+  f <- merge(x = f_rs, y = df_do_toBeLinked, by = 'YEID') 
   
-  f_check <- f %>%
-    arrange(!is.na(year), !is.na(Year))
+  f_check <- f %>% arrange(!is.na(year), !is.na(Year))
   
   ### write to .xlsx ---------------------------------
   pre_name <- paste0('sample_2000to2019_pixelValue_with', gsub('_', '', whichDO), '_')
@@ -743,24 +760,22 @@ for (nw in seq(1, slots)) {
   writexl::write_xlsx(x = f, path = fname)
   
   
-  ### convert to .shp --------------------------------
-  projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+  ### convert to .shp -------------------------------- <to use the following chunk on selected files, no need to get all shapefiles>
+  # projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
   
-  ### to train RF in GEE, there should be no NA values in each band
-  f      <- merge(x = f_rs, y = df_do_toBeLinked, by = 'YEID') 
-  f_noNA <- merge(x = f_rs %>% drop_na(), y = df_do_toBeLinked, by = 'YEID') 
+  ### to train RF in GEE, there should be no NA values in each band ----
+  # f_noNA <- merge(x = f_rs %>% drop_na(), y = df_do_toBeLinked, by = 'YEID') 
+  # f_noNAshp<- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+  # shp_name <- paste0(pre_name, nw, prefix, '_noNA', '.shp');  
+  # shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+  # st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
   
-  
-  f_shp    <- st_as_sf(x = f,      coords = c("lon", "lat"), remove = F, crs = projcrs)
-  shp_name <- paste0(pre_name, nw, prefix, '_withNA', '.shp');  
-  shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
-  st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
-  
-  
-  f_noNAshp<- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
-  shp_name <- paste0(pre_name, nw, prefix, '_noNA', '.shp');  
-  shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
-  st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+  ### shp with NA -----
+  # f_shp    <- st_as_sf(x = f,      coords = c("lon", "lat"), remove = F, crs = projcrs)
+  # shp_name <- paste0(pre_name, nw, prefix, '_withNA', '.shp');  
+  # shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+  # st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+
 }
 ```
 
@@ -768,10 +783,49 @@ for (nw in seq(1, slots)) {
 
 
 
-```{r Training samples for RF in GEE}
+```{r - Prepare samples for RF in GEE}
 
 ### see code in the above chuck
 ###   upload the shape files to GEE 
+
+
+
+
+### 1. to choose training samples with which time lag
+
+  # 1.1 to use n-day composite as training samples
+  # fname <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_1_10DaysBefore.xlsx'); print(fname)
+  fname <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_1_5DaysBefore.xlsx'); print(fname)
+
+  # 1.2 to use daily training samples
+  # fname <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_byDay_3_dayBefore.xlsx'); print(fname)
+  # fname <- paste0(dir.cleaned, 'by_timelag_withDO/', 'sample_2000to2019_pixelValue_withDObottom_byDay_18_dayBefore.xlsx'); print(fname)
+  
+  
+  f <- readxl::read_excel(fname)
+  f_noNA <- f %>% drop_na()
+  
+  ### print the number of complete samples
+  f_noNA %>% dplyr::filter(year == 2014) %>% nrow()
+
+
+
+
+
+### 2. convert to .shp in order to be uploaded to GEE
+projcrs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+### --- to train RF in GEE, there should be no NA values in each band
+# f_shp    <- st_as_sf(x = f,      coords = c("lon", "lat"), remove = F, crs = projcrs)
+# shp_name <- paste0(pre_name, nw, prefix, '_withNA', '.shp');  
+# shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+# st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
+
+
+f_shp <- st_as_sf(x = f_noNA, coords = c("lon", "lat"), remove = F, crs = projcrs) ## crs = 4326 (not sure?)
+shp_name <- gsub('.xlsx$', '_noNA_R1.shp', fname) %>% basename();  
+shp_path <- paste0(dir.cleaned, 'by_timelag_withDO/shp/', shp_name); print(shp_path)
+st_write(obj = f_shp, dsn = shp_path, layer = shp_name, driver = "ESRI Shapefile", delete_dsn = T)
 ```
 
 

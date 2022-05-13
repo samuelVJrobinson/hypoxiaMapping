@@ -22,7 +22,8 @@ library(randomForest)
 # library(tidyverse)
 library(dplyr)
 library(tidyr)
-require(hydroGOF)    ## for calculating RMSE and MAE
+require(hydroGOF)  ## for calculating RMSE and MAE
+library(Rmisc)     ## `summarySE()` provides sd, se of the mean, and a (default 95%) confidence interval
 
 
 library(cowplot)
@@ -481,7 +482,7 @@ subset_sample = 0.30 ## if the total complete samples > 30%, then randomly subse
 
 ### - 4. selected features based on importance score
 feature_remove <- c()                                  ## keep all variables
-feature_remove <- c('Rrs_555', 'Rrs_547', 'Rrs_531')   ## remove these not important variables
+# feature_remove <- c('Rrs_555', 'Rrs_547', 'Rrs_531')   ## remove these not important variables // not better after removing, so just ignore
 
 
 ### - 5. use postfix to distingush different results
@@ -732,9 +733,8 @@ acc0_input <- acc0_fillna; markNAfill <- 'fillna'
 
 ```{r - smooth}
 ### option 2. if loop n times 
-# `summarySE` provides the standard deviation, standard error of the mean, and a (default 95%) confidence interval
-library(Rmisc)
-acc1 <- summarySE(data = acc0_input, measurevar="value", groupvars=c("year", "nw", "err"), na.rm = T)
+
+acc1 <- Rmisc::summarySE(data = acc0_input, measurevar="value", groupvars=c("year", "nw", "err"), na.rm = T)
 acc  <- acc1 %>%
   merge(x = ., y = n_complete_sample, by = c('year', 'nw'), all.x = T)
 

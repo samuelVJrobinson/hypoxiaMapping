@@ -55,12 +55,12 @@ head(LLmapDatFull)
 ## Select data for plotting
 ```{r}
 
-## --> 1st to choos -----------------------> 
-dat <- FRmapDat; which_dat <- 'FR'
-# dat <- LLmapDat; which_dat <- 'LL'
+## --> 1st parameter to choose -----------------------> 
+# dat <- FRmapDat; which_dat <- 'FR'
+dat <- LLmapDat; which_dat <- 'LL'
 
 
-## --> 2nd to choose ---------------------->
+## --> 2nd parameter to choose ----------------------->
 # which_do <- 'minDO'
 which_do <- 'meanDO'
 
@@ -255,18 +255,18 @@ library(grid)
 ## 1. in a 9*1 panel --------------------------
 
 ## This function aims to plot multiple maps in one column 
-source('./func_domap_1col.R')
+source('./code/func_domap_1col.R')
 # func_domap_1col(n_plots = 9, h = 3.2)
-func_domap_1col(n_plots = 9, h = 3.2/2)
+func_domap_1col(n_plots = 9, h = 3.2/2, postfix = "_R1")
 
 ```
 
 
 
-
+  *Test ONLY* but not used. 
 ```{r eval=FALSE, include=FALSE}
 ## 2. in a 3*3 panel --------------------------
-fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_3col.png"); fname
+fname <- paste0("./figures/do_maps_", which_dat, '_', which_do,  "_3col_R1.png"); fname
 png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
 
 # by rows 
@@ -295,7 +295,8 @@ dev.off()
 ```
 
 
-  Put 3 map in one panel -- NOT WORKING WELL
+  *Test ONLY* but not used. 
+    Put 3 map in one panel -- NOT WORKING WELL
   
 ```{r eval=FALSE, include=FALSE}
 library(png)

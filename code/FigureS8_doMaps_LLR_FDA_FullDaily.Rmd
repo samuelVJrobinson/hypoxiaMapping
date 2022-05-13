@@ -1,0 +1,292 @@
+---
+title: "Untitled"
+author: "Yingjie"
+date: "11/1/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+# Package
+```{r}
+remove(list = ls())
+
+library(readr)
+library(tidyverse)
+library(cowplot)
+
+## DF to Raster
+library(sp)
+library(raster)
+
+
+## Plot maps
+library(tmap)
+library(RColorBrewer)
+library(grid) ## put plots in a panel
+
+
+## a function to only keep 'dead zone' cells, while remove all other cells
+func_dz_raster <- function(r){
+  r[r > 2]  <- NA
+  r[r <= 2] <- 1    ## 
+  return(r)
+}
+
+```
+
+
+# Data
+
+## Load FDA, LLR data
+```{r}
+# ## load FR data
+# load('./data/FRmapDat.Rdata')
+# head(FRmapDat)
+# # str(FRmapDat)
+# 
+# 
+# ## load LL data
+# load('./data/LLmapDat.Rdata')
+# head(LLmapDat)
+# # str(LLmapDat)
+
+
+##
+load('./data/FRmapDatFull.Rdata') # --> FRmapDatFull
+# head(FRmapDatFull)
+load('./data/LLmapDatFull.Rdata') # --> LLmapDatFull
+# head(LLmapDatFull)
+
+
+postfix <- ""     ## first submission
+postfix <- "_R1"  ## first revision
+```
+
+
+# Figure S8 - Plot maps (7/21 - 7/31)
+
+```{r}
+## This function aims to plot multiple maps in one column 
+source('./code/func_domap_1col.R')
+
+which_do <- 'predDO'
+
+### load help data, such as the Gulf states, rivers, state boundary
+load('./data/helper_data_map.RData')
+```
+
+
+
+
+### FDA, LLR
+```{r}
+
+
+dat <- FRmapDatFull; which_dat <- 'FR'
+dat <- LLmapDatFull; which_dat <- 'LL'
+
+
+### read in the DO raster
+pat <- paste0(which_dat, "map_", which_do, ".*", postfix, ".tif$"); pat
+ras_ls <- list.files(path = './data/results/daily/', pattern = pat, full.names = T); ras_ls
+
+
+### test use
+ras <- ras_ls[1]; ras
+
+
+### loop and plot the DO raster
+for (ras in ras_ls) {
+  
+  ## to get a formatted name for each plot 
+  date_ini <- basename(ras) %>% gsub("\\D", "", .) %>% as.Date(., "%Y%m%d"); print(date_ini)
+  # date_end <- (date_ini) + 9; #print(date_ini)
+  # ras_nm <- paste0(date_ini, ' ~ ', date_end); print(ras_nm)
+  ras_nm <- date_ini %>% gsub('-', '', .); #print(ras_nm)
+  map_nm <- paste0('domap_', which_dat, ras_nm)
+  
+  dz  <- raster(ras)
+  dz[dz < 0] <- 0    ## turn negative values to 0
+  
+  domap <-
+    tm_shape(dz, bbox = bhu_bb) +
+    tm_raster(style = "fixed", 
+              # style = "cont",
+              title = "DO (mg/l)",
+              breaks = seq(0, 8, 2),
+              palette = brewer.pal(9,"RdYlBu"), legend.show = F) +
+    tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+    tm_layout(bg.color = '#4575B4', legend.height = 1,
+              legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+              legend.text.color = 'white', legend.title.color= 'white',
+              # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+              title = ras_nm, 
+              # title.position = c('left', 'bottom'), 
+              title.position = c(0, 0.9), title.size = 0.7,
+              legend.position= c("left", "bottom"))
+  domap
+  
+  ## to assign a name to each plot for later use
+  assign(map_nm, domap)
+}
+
+
+## get the list of all the plots
+domap_ls <- mget(ls(pattern = paste0('domap_', which_dat, '2014')))
+
+
+## put all plots in one panel ----------------------------------------------------------------------
+library(grid)
+
+
+
+## 1. in a 3*3 panel --------------------------
+# fname <- paste0("./figures/do_maps_SI_", which_dat, '_', which_do,  "_3col.png"); fname
+# png(filename = fname, pointsize =12, width = 7, height = 4, units="in", res = 300)
+# 
+# # by rows 
+# grid.newpage()
+# pushViewport(viewport(layout = grid.layout(
+#   nrow = 4,
+#   ncol = 3
+#   )))
+# 
+# z = 0
+# for (i in 1:4) {
+#   # print(i)
+#   for (j in 1:3) {
+#     z = z + length(i)
+#     print(z)
+#     
+#     if (z>12) {
+#       break
+#     }
+#     print(domap_ls[z], vp = viewport(layout.pos.row = i, layout.pos.col = j))
+#   }
+# }
+# dev.off()
+
+
+## 2. in a n row * 1 col panel --------------------------
+# func_domap_1col(n_plots = 11, h = 3.2)
+func_domap_1col(n_plots = 11, h = 3.2/2, postfix = postfix)
+```
+
+
+
+### RF
+```{r}
+
+## data path -----------------------------------------------------------------------------
+
+# dir.do.tif <- paste0('./data/results_RF/predict_do_maps_lag10d', '/')                ## 2021-11-23
+dir.do.tif <- paste0('./data/results_RF/predict_do_maps_lag10d', postfix, '/')       ## 2022-05-12
+which_dat <- 'RF'
+
+
+date_ls <- seq(as.Date("2014-07-21"), as.Date("2014-07-31"), by="days")
+ras_ls  <- paste0(dir.do.tif, 'do_map_', gsub('-', '', date_ls), '.tif'); ras_ls
+
+date_oi <- c(as.Date('2014-07-21'), as.Date('2014-07-31'))
+
+## TEST 
+# ras <- ras_ls[1]
+
+counter = 0
+for (i in 1:length(ras_ls)) {
+  ras <- ras_ls[i]
+  ## this will be used to determine if to add a legend --> only add a legend to the 1st map
+  counter = counter + length(ras); #print(counter)
+  yes_or_no <- if(counter < 2) 1 else 0
+  print(yes_or_no)
+  
+  date_ini <- basename(ras) %>% gsub('do_map_|\\.tif', '', .) %>% as.Date(., "%Y%m%d"); print(date_ini)
+  ras_nm <- date_ini %>% gsub('-', '', .); print(ras_nm)
+  map_nm <- paste0('domap_', which_dat, ras_nm)
+  
+  ## - only map TIF on  7/21 and 7/31 -------------------------------- #
+  
+  ## --> add a legend to the first map only
+  if (date_ini == as.Date('2014-07-21')) { 
+    dz  <- raster(ras)
+    domap <-
+      tm_shape(dz, bbox = bhu_bb) +
+      tm_raster(style = "fixed", 
+                # style = "cont",
+                title = "DO (mg/l)",
+                breaks = seq(0, 8, 2),
+                palette = brewer.pal(9,"RdYlBu"), legend.show = 0) + ## legend.show = yes_or_no
+      tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+      tm_layout(bg.color = 'black', legend.height = 1, legend.bg.alpha = 0.7, 
+                legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+                legend.text.color = 'white', legend.title.color= 'white',
+                # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+                title = ras_nm, 
+                # title.position = c('left', 'bottom'), 
+                title.position = c(0, 0.9), title.size = 0.7,
+                legend.position= c(0.8, 0))
+    domap
+    # assign(map_nm, domap)
+    
+    ## --> print the next available map ------------------------------- #
+  } else if(date_ini == as.Date('2014-07-31')) {
+    dz  <- raster(ras)
+    domap <-
+      tm_shape(dz, bbox = bhu_bb) +
+      tm_raster(style = "fixed", 
+                # style = "cont",
+                title = "DO (mg/l)",
+                breaks = seq(0, 8, 2),
+                palette = brewer.pal(9,"RdYlBu"), legend.show = yes_or_no) +
+      tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+      tm_layout(bg.color = 'black', legend.height = 0.5, legend.bg.alpha = 0.5, 
+                legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+                legend.text.color = 'white', legend.title.color= 'white',
+                # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+                title = ras_nm, title.position = c(0, 0.9), title.size = 0.7,
+                # title.position = c('left', 'bottom'), 
+                legend.position= c("right", "bottom"))
+    
+    
+  } 
+  
+  ## --> print the legend on the 2nd blank map --------------------- #
+  # else if (counter == 2) {
+  #   domap <- tm_shape(dz, bbox = bhu_bb) +
+  #     tm_raster(style = "fixed", 
+  #               # style = "cont",
+  #               title = "DO (mg/l)",
+  #               breaks = seq(0, 8, 2),
+  #               palette = brewer.pal(9,"RdYlBu"), legend.show = 1) +
+  #     tm_shape(usa) + tm_polygons(col = "gray90",  border.col = NA, legend.show=F)+
+  #     tm_layout(bg.color = 'black', legend.height = 2, legend.bg.alpha = 0.8, 
+  #               legend.bg.color = 'black', outer.bg.color = 'white', frame = T,
+  #               legend.text.color = 'white', legend.title.color= 'white',
+  #               # main.title = ras_nm, main.title.position = "left", main.title.size = 1, 
+  #               title = ras_nm, legend.only = T,
+  #               # title.position = c('left', 'bottom'), 
+  #               title.position = c(0, 0.9), title.size = 0.7,
+  #               legend.position= c(0.4, 0))
+  #   
+  # } 
+  
+  ## --> print blank maps ------------------------------------------ #
+  else {
+    domap <- plot.new() # plot(1, type = "n", xlab = "", ylab = "", xlim = c(0, 5), ylim = c(0, 5))
+  }
+  assign(map_nm, domap)
+
+}
+
+
+domap_ls <- mget(ls(pattern = paste0('domap_', which_dat, '2014')))
+
+func_domap_1col(n_plots = 11, h = 3.2/2, postfix = postfix)
+
+```
+
+
+
