@@ -48,12 +48,11 @@ postfix <- "_R1"  ## first revision
 
 
 ```{r - Load RF area data}
-getwd()
 
 ## temporal change of dz area in 2014 ----------------------------------------------------
-# csv <- './data/results_RF/area_dz_over_time_geeRF.csv'
-# csv <- './data/results_RF/area_dz_over_time_geeRF_10d.csv'
-csv <- './data/results_RF/area_dz_over_time_geeRF_10d_R1.csv' ## 2022-05-12
+# csv <- './data/results_RF/dz_area_overTimee_geeRF.csv'
+# csv <- './data/results_RF/dz_area_overTime_geeRF_10d.csv'
+csv <- './data/results_RF/dz_area_overTime_geeRF_10d_R1.csv' ## 2022-05-12
 
 area_dz_rf <- read_csv(csv) %>%
   rename_at(vars(starts_with("system")), ~'date') %>%
@@ -280,7 +279,7 @@ for (i in 1:length(dat_ls)) {
   }
   
   
-  fname <- paste0('./data/', which_dat, 'mapDatFull_dz_area_overTime', postfix, '.csv'); print(fname)
+  fname <- paste0('./data/results/', 'dz_area_overTime_', which_dat, 'mapDatFull', postfix, '.csv'); print(fname)
   write.csv(x = area_df, file = fname, row.names = F)
 
 }
@@ -367,8 +366,8 @@ area_dz_rf %>%
 
 
 ```{r - FDA & LLR}
-area_dz_fr <- readr::read_csv(paste0("./data/FRmapDatFull_dz_area_overTime", postfix, ".csv"))
-area_dz_ll <- readr::read_csv(paste0("./data/LLmapDatFull_dz_area_overTime", postfix, ".csv"))
+area_dz_fr <- readr::read_csv(paste0("./data/results/dz_area_overTime_FRmapDatFull", postfix, ".csv"))
+area_dz_ll <- readr::read_csv(paste0("./data/results/dz_area_overTime_LLmapDatFull", postfix, ".csv"))
 area_dz_2model    <- rbind(area_dz_fr, area_dz_ll)
 
 area_dz_2model %>%
