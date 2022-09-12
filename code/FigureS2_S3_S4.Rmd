@@ -34,6 +34,10 @@ library(viridis)
 # devtools::install_github("jaredhuling/jcolors")
 library(jcolors)
 library(scico) ## colors
+
+### keep more decimals 
+options(digits = 15)
+options(pillar.sigfig = 15)
 ```
 
 
@@ -55,10 +59,7 @@ dir.fig    <- paste0(dirname(dir), '/figures/'); dir.fig
 dir.output <- './data_cleaned/'
 
 today <- format(Sys.time(), "%Y%m%d"); print(today)
-
-### keep more decimals 
-options(digits = 15)
-options(pillar.sigfig = 15)
+postfix <- 'R2'
 ```
 
 
@@ -183,7 +184,7 @@ doDmax <- do %>%
 ggpubr::ggarrange(s2a, s2b, labels = c('(a)', '(b)'), nrow = 2,
                   font.label = list(color = "black", face = "plain", family = NULL, position = "top"))
 
-fname <- paste0(dir.fig, 'Fig S2.png'); fname
+fname <- paste0(dir.fig, 'Fig S2_', postfix,'.png'); fname
 ggsave(filename = fname, plot = last_plot(), bg = "transparent",
        width = 7, height = 7, units = 'in', dpi = 300)
 ```
@@ -201,7 +202,7 @@ do %>% group_by(YEID, lat, lon) %>% tally() %>%
   theme_bw()
 
 
-fname <- paste0(dir.fig, 'Fig S3.png'); fname
+fname <- paste0(dir.fig, 'Fig S3_', postfix,'.png'); fname
 ggsave(filename = fname, plot = last_plot(), bg = "transparent",
        width = 7, height = 3.5, units = 'in', dpi = 300)
 ```
@@ -213,29 +214,53 @@ ggsave(filename = fname, plot = last_plot(), bg = "transparent",
 ## label the points that are defined as "bottom" 
 do_isbottom <- do %>%
   group_by(YEID) %>%
-  dplyr::mutate(depth_max = max(Depth, na.rm = T),
-                is_bottom = ifelse(Depth == depth_max, 'bottom', 'non-bottom')) %>%
-  dplyr::select(-depth_max)
+  # dplyr::mutate(depth_max = max(Depth, na.rm = T),
+  #               is_bottom = ifelse(Depth == depth_max, 'bottom', 'non-bottom')) %>%
+  # dplyr::filter(is_bottom != 'non-bottom') %>%
+  # dplyr::select(-depth_max) %>%
+  as.data.frame()
 
 
 ## Figure S4. DO and water temperature in the profile at different depths. -------------------------
 # do %>% ## 1st submission used `do` as input data
 do_isbottom %>%  
+  dplyr::mutate(label = ifelse(Date == as.Date("2014-05-26"), "Hypoxia", '')) %>%
   ggplot()+
+  
+  # geom_rect(aes(xmin = -Inf, xmax = 2, ymin = -Inf, ymax = Inf),
+  #           fill = "grey", alpha = 0.4, color = "red") +
+  annotate(geom = "rect", xmin = -Inf, xmax = 2, ymin = -Inf, ymax = Inf,
+           fill = "gray", colour = NA, alpha = 0.5) +
+  # annotate(geom = "text",
+  #          x = 1, y = -75,
+  #          angle = 0, hjust = 0,
+  #          aes(label = label)) +
+  geom_text(
+           x = .5, y = -70,
+           angle = 90, color = 'gray50',
+           # hjust = 0, 
+           aes(label = label)) +
+  
   geom_point(aes(x = DO, y = -Depth, color = Temp), show.legend = T) + ## `, shape = is_bottom`
-  # facet_wrap(~Date) + ## 1st submission used this line 
-  # facet_grid( Date ~ is_bottom) + ## 1st revision used this line
-  facet_wrap(Date ~ is_bottom, ncol = 10) +
-  # scico::scale_color_scico(palette = "roma") +
+  # facet_wrap(~Date) +                          ## 1st submission used this line 
+  # facet_grid(Date ~ is_bottom) +               ## 1st revision used this line
+  # facet_wrap(Date ~ is_bottom, ncol = 10) +    ## 1st revision used this line
+  facet_wrap(~Date) +                            ## 2nd revision used this line
+  
   scale_color_viridis(option="inferno", direction = 1) +
+  scale_x_continuous(breaks = c(2, seq(0, 15, 5)), limits = c(0, 17)) + 
   geom_vline(xintercept = 2,   color = "red",  alpha = 0.6) + #linetype = "dotted", 
-  geom_hline(yintercept = -50, color = "blue", alpha = 0.6) +
+  geom_hline(yintercept = -50, color = "gray", alpha = 0.7, linetype = "dashed") +
+  
+ 
+  
   ylab('Sampling depth (m)') + 
   xlab('DO (mg/l)') +
   ggtitle('DO and water temperature at different sampling depth') +
-  theme_bw()
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
 
-fname <- paste0(dir.fig, 'Fig S4_revise1.png'); fname
+fname <- paste0(dir.fig, 'Fig S4_', postfix,'.png'); fname
 ggsave(filename = fname, plot = last_plot(), bg = "transparent",
        width = 12, height = 8, units = 'in', dpi = 300)
 ```
