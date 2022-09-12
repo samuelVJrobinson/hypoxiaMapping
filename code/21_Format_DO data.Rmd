@@ -37,7 +37,8 @@ library(scico) ## colors
 
 ```{r Dirs}
 ## revision
-rr <- 'R1' ## 1st revision for RSE
+# rr <- 'R1' ## 1st revision for RSE
+rr <- 'R2' ## 1st revision for RSE
 
 today <- format(Sys.time(), "%Y%m%d"); print(today)
 
@@ -448,8 +449,8 @@ pname <- paste0(dir.fig, 'map_samp_by source2_', rr, '.png'); pname
 
 ```{r}
 
-## here we use data from `telecoupling`
-f <- list.files(path = dirname(getwd()), pattern = "^sample_2000_2019_do_bottom\\.xlsx$", full.names = T, recursive = T)
+f <- list.files(path = dirname(getwd()) %>% dirname(), 
+                pattern = "^sample_2000_2019_do_bottom\\.xlsx$", full.names = T, recursive = T)
 f
 if(length(f) > 1) {
   break  ## if there are two or more files found, report error. If only one, then go on. 
@@ -499,7 +500,7 @@ str(do_depth_max_sf)
 
 ggplot() +
   geom_sf(data = do_depth_max_sf, aes(color = DO)) +
-  geom_sf(data = grid, fill = NA, color = 'red', size = 0.1) +
+  # geom_sf(data = grid, fill = NA, color = 'red', size = 0.1) +
   scico::scale_color_scico(palette = "roma") +
   theme_bw() +
   theme(panel.grid.minor = element_blank(), axis.title = element_blank(),
@@ -541,8 +542,10 @@ fname <- paste0(dir.fig, 'do_bottom_map_2014_agg_', rr, '.png'); fname
 
 
 ggplot() +
+  
+  # geom_sf(data = pts.poly.agg.sf, aes(fill = do_mean), alpha = 0.5, show.legend = F) + ## R1
+  geom_sf(data = pts.poly.agg.sf, fill = 'white', color = 'gray80', alpha = 0.5, show.legend = F) +   ## R2
   geom_sf(data = do_depth_max_sf, aes(color = DO), show.legend = T) +
-  geom_sf(data = pts.poly.agg.sf, aes(fill = do_mean), alpha = 0.5, show.legend = F) +
   scico::scale_fill_scico(palette = "roma") +
   scico::scale_color_scico(palette = "roma") +
   # guides(fill = guide_legend(title='DO (mg/l)', )) +
