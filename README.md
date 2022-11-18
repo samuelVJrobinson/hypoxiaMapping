@@ -6,7 +6,8 @@
 Contributors: Samuel Robinson, Yingjie Li, Lan Nguyen 
 
 
-## Manuscript under review
+## Publication
 
-Li, Y., Robinson, S., Nguyen, L., Liu, J. Satellite Imagery Can Predict Coastal Hypoxic "Dead Zones" (*Remote Sensing of Environment, submitted*)
+[Li, Y.](https://yingjieli.org/), Robinson, S.V.J., Nguyen, L.H., Liu, J., 2023. Satellite prediction of coastal hypoxia in the northern Gulf of Mexico. **Remote Sensing of Environment** 284, 113346. https://doi.org/10.1016/j.rse.2022.113346
+
 
